@@ -1,0 +1,75 @@
+# Ansible
+*.retry
+.vault_pass
+vault_pass.txt
+host_vars/
+group_vars/*/vault.yml
+group_vars/*/vault.yaml
+
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.iml
+id_rsa*
+id_ed25519*
+*.pub
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+temp/
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Custom inventory files with sensitive data
+inventory_production.ini
+inventory_prod.ini
+*_secrets.yml
+*_secrets.yaml
+
+# Terraform (if used alongside)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Local test files
+test_*
+scratch/

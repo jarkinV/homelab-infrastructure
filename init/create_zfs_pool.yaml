@@ -1,0 +1,84 @@
+---
+- name: Create ZFS RAIDZ1 pool on Proxmox
+  hosts: proxmox_hosts
+  become: yes
+  vars:
+    pool_name: "tank"
+    disk_serials:
+      - "2522RSD00423"
+      - "2521JMD00443"
+      - "2521JMD00428"
+      - "2522RSD00868"
+
+  tasks:
+    - name: Install ZFS utilities
+      apt:
+        name:
+          - zfsutils-linux
+        state: present
+        update_cache: yes
+
+    - name: Build disk paths from serial numbers
+      set_fact:
+        disk_devices: "{{ disk_serials | map('regex_replace', '^(.*)', '/dev/disk/by-id/ata-WD_Red_SA500_2.5_2TB_\\1') | list }}"
+
+    - name: Verify disk paths exist
+      stat:
+        path: "{{ item }}"
+      register: disk_paths
+      loop: "{{ disk_devices }}"
+
+    - name: Check all disks are available
+      assert:
+        that: item.stat.exists
+        fail_msg: "Disk {{ item.item }} not found. Please verify serial numbers."
+      loop: "{{ disk_paths.results }}"
+
+    - name: Check if disks are in use
+      shell: "lsblk -no MOUNTPOINT {{ item }} | grep -v '^$' || true"
+      register: disk_mountpoints
+      loop: "{{ disk_devices }}"
+      changed_when: false
+
+    - name: Verify disks are not mounted
+      assert:
+        that: item.stdout == ""
+        fail_msg: "Disk {{ item.item }} is currently mounted or in use"
+      loop: "{{ disk_mountpoints.results }}"
+
+    - name: Check if ZFS pool already exists
+      shell: "zpool list {{ pool_name }}"
+      register: pool_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Create ZFS RAIDZ1 pool
+      command: >
+        zpool create -f
+        -o ashift=12
+        -O compression=lz4
+        -O atime=off
+        -O xattr=sa
+        -O acltype=posixacl
+        {{ pool_name }}
+        raidz1
+        {{ disk_devices | join(' ') }}
+      when: pool_exists.rc != 0
+
+    - name: Get pool status
+      command: "zpool status {{ pool_name }}"
+      register: pool_status
+      changed_when: false
+
+    - name: Display pool status
+      debug:
+        var: pool_status.stdout_lines
+
+    - name: Get pool capacity
+      command: "zpool list {{ pool_name }}"
+      register: pool_list
+      changed_when: false
+
+    - name: Display pool capacity
+      debug:
+        var: pool_list.stdout_lines
