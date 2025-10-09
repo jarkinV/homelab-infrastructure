@@ -1,0 +1,248 @@
+---
+- name: Create Debian VM ready to use
+  hosts: proxmox_hosts
+  become: yes
+  vars:
+    # Default values - can be overridden with -e parameters
+    default_vm_name: "debian-vm"
+    default_vm_description: "Debian 12 VM created with Ansible"
+    default_vm_cores: 3
+    default_vm_memory: 8192
+    default_vm_disk_size: "50G"
+    default_vm_storage: "local-lvm"
+    default_vm_bridge: "vmbr0"
+    default_vm_start_on_boot: true
+    default_vm_start_after_creation: true
+    default_vm_enable_agent: true
+    default_debian_version: "12"
+    default_debian_arch: "amd64"
+    default_cloud_init_user: "debian"
+    default_cloud_init_password: "debian"
+    default_ssh_keys: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDePcyCfczJuAZzm+uLDDGTlRGWjWNCCqt/qX7iXxVWB3KwyLtMHXlBwX4DGwf026VyKAi5m2cJUU9enhhkzGuFHF2XEZ1lZq/yuiJXiFrxd3/UZwubhv+Ut493BBupSzgmutU4EzR0KjKGj8eteB1fiWKXOM2sQNRbOKcoN4uZjW8+I4rauszsR1RbKI6ruLaN41aK43lVNveEf6YpchxCYuyL+ovudZwpjmCeU3Q97bB+1wguSPaZHNkVZkuNyj6Ee5tmkI8WDCNNFR4M4dmm6u4Q1HODbpQQ/3H08Xsnp4oBZZudRJ3D2mCDZJu4WBWxYD6kyT4SBfTNB2qs/Y8sluHsQY3pioeBhL3kBPGoerkJSbLB45VVZIL7oJw9T3PU16681pdvfhOr6LrQnEKbVZde6oOK+Byc/A7bIsfUjqYTzyS1U3GrtLbcDhilhahCU3ao8FIJt+CoY8oBpp55ouasZhyu5JpWuhUsKmaUbBH6pVg3PDjGYEf0WM65utZlomYhsgQxjGl29lvFp1YJ7nBXQzCqym0tI2njQv3VQ8LaY6i6U/5tRxOhsD0ggLCJRXm+pv6pvftJB2aQEBgMGmwwMxK5qRMByueh+ZDMYem7lcNEBLiCta2SdOwb6gCLWSmwq2BSfppMEq+C3IEamUVag2ZioF8CQBfquOEwZQ== yaroslav@varshavskyi.com"
+
+  tasks:
+    - name: Set VM configuration variables with defaults
+      set_fact:
+        vm_name: "{{ vm_name | default(default_vm_name) }}"
+        vm_description: "{{ vm_description | default(default_vm_description) }}"
+        vm_cores: "{{ vm_cores | default(default_vm_cores) }}"
+        vm_memory: "{{ vm_memory | default(default_vm_memory) }}"
+        vm_disk_size: "{{ vm_disk_size | default(default_vm_disk_size) }}"
+        vm_storage: "{{ vm_storage | default(default_vm_storage) }}"
+        vm_bridge: "{{ vm_bridge | default(default_vm_bridge) }}"
+        vm_vlan: "{{ vm_vlan | default('') }}"
+        vm_mtu: "{{ vm_mtu | default('') }}"
+        vm_start_on_boot: "{{ vm_start_on_boot | default(default_vm_start_on_boot) }}"
+        vm_start_after_creation: "{{ vm_start_after_creation | default(default_vm_start_after_creation) }}"
+        vm_enable_agent: "{{ vm_enable_agent | default(default_vm_enable_agent) }}"
+        debian_version: "{{ debian_version | default(default_debian_version) }}"
+        debian_arch: "{{ debian_arch | default(default_debian_arch) }}"
+        cloud_init_user: "{{ cloud_init_user | default(default_cloud_init_user) }}"
+        cloud_init_password: "{{ cloud_init_password | default(default_cloud_init_password) }}"
+        ssh_keys: "{{ ssh_keys | default(default_ssh_keys) }}"
+
+    - name: Generate unique VM ID if not specified
+      set_fact:
+        vm_id: "{{ (ansible_date_time.epoch | int % 100000) + 10000 + (vm_name | hash('md5') | regex_replace('[^0-9]', '') | int % 1000) }}"
+      when: vm_id is not defined
+
+    - name: Set temporary directory path
+      set_fact:
+        temp_dir: "/tmp/vm-creation-{{ vm_id }}"
+
+    - name: Generate random MAC address
+      set_fact:
+        vm_mac: "02:{{ '%02x' % (range(0, 256) | random) }}:{{ '%02x' % (range(0, 256) | random) }}:{{ '%02x' % (range(0, 256) | random) }}:{{ '%02x' % (range(0, 256) | random) }}:{{ '%02x' % (range(0, 256) | random) }}"
+
+    - name: Check if VM ID already exists
+      shell: "qm status {{ vm_id }}"
+      register: vm_exists_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if VM ID already exists
+      fail:
+        msg: "VM with ID {{ vm_id }} already exists. Please specify a different vm_id."
+      when: vm_exists_check.rc == 0
+
+    - name: Validate storage exists
+      shell: "pvesm status --storage {{ vm_storage }}"
+      register: storage_check
+      failed_when: storage_check.rc != 0
+      changed_when: false
+
+    - name: Create temporary directory
+      file:
+        path: "{{ temp_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Get Debian cloud image URL
+      set_fact:
+        debian_image_url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-{{ debian_version }}-nocloud-{{ debian_arch }}.qcow2"
+        debian_image_file: "debian-{{ debian_version }}-nocloud-{{ debian_arch }}.qcow2"
+
+    - name: Download Debian cloud image
+      get_url:
+        url: "{{ debian_image_url }}"
+        dest: "{{ temp_dir }}/{{ debian_image_file }}"
+        mode: '0644'
+        timeout: 300
+      register: download_result
+
+    - name: Check if required tools are available
+      shell: "which virt-customize && which qemu-img"
+      register: tools_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install libguestfs-tools if needed
+      package:
+        name: libguestfs-tools
+        state: present
+      when: tools_check.rc != 0
+
+    - name: Verify required tools are available
+      shell: "which virt-customize && which qemu-img"
+      register: tools_verify
+      failed_when: tools_verify.rc != 0
+
+    - name: Customize Debian image - install basic packages
+      command: >
+        virt-customize -q -a "{{ temp_dir }}/{{ debian_image_file }}"
+        --install qemu-guest-agent,openssh-server,curl,wget,vim,htop,net-tools,sudo,ca-certificates
+      register: customize_basic
+
+    - name: Customize Debian image - set hostname
+      command: >
+        virt-customize -q -a "{{ temp_dir }}/{{ debian_image_file }}"
+        --hostname "{{ vm_name }}"
+      register: customize_hostname
+
+    - name: Customize Debian image - enable services
+      command: >
+        virt-customize -q -a "{{ temp_dir }}/{{ debian_image_file }}"
+        --run-command "systemctl enable qemu-guest-agent"
+        --run-command "systemctl enable ssh"
+      register: customize_services
+
+    - name: Customize Debian image - configure SSH
+      command: >
+        virt-customize -q -a "{{ temp_dir }}/{{ debian_image_file }}"
+        --run-command "sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config"
+        --run-command "sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config"
+      register: customize_ssh
+
+    - name: Customize Debian image - reset machine ID
+      command: >
+        virt-customize -q -a "{{ temp_dir }}/{{ debian_image_file }}"
+        --run-command "echo -n > /etc/machine-id"
+      register: customize_machine_id
+
+    - name: Expand disk image to target size
+      shell: |
+        cd {{ temp_dir }}
+        qemu-img create -f qcow2 expanded.qcow2 {{ vm_disk_size }}
+        virt-resize --expand /dev/sda1 {{ debian_image_file }} expanded.qcow2
+        mv expanded.qcow2 {{ debian_image_file }}
+      register: expand_disk
+
+    - name: Create VM with basic configuration
+      command: >
+        qm create {{ vm_id }}
+        --name "{{ vm_name }}"
+        --description "{{ vm_description }}"
+        --agent {{ '1' if vm_enable_agent else '0' }}
+        --cores {{ vm_cores }}
+        --memory {{ vm_memory }}
+        --net0 virtio,bridge={{ vm_bridge }},macaddr={{ vm_mac }}{{ ',tag=' + vm_vlan if vm_vlan else '' }}{{ ',mtu=' + vm_mtu if vm_mtu else '' }}
+        --ostype l26
+        --scsihw virtio-scsi-pci
+        --bios ovmf
+        --machine q35
+        --onboot {{ '1' if vm_start_on_boot else '0' }}
+        --tablet 0
+        --localtime 1
+        --serial0 socket
+      register: vm_creation
+
+    - name: Get storage type for disk configuration
+      shell: "pvesm status -storage {{ vm_storage }} | awk 'NR>1 {print $2}'"
+      register: storage_type_result
+      changed_when: false
+
+    - name: Set disk configuration based on storage type
+      set_fact:
+        disk_format: "{{ 'qcow2' if storage_type_result.stdout in ['dir', 'nfs'] else 'raw' }}"
+        efi_disk: "vm-{{ vm_id }}-disk-0"
+        main_disk: "vm-{{ vm_id }}-disk-1"
+
+    - name: Allocate EFI disk
+      command: "pvesm alloc {{ vm_storage }} {{ vm_id }} {{ efi_disk }} 4M"
+      register: efi_alloc
+
+    - name: Import main disk image
+      command: "qm importdisk {{ vm_id }} {{ temp_dir }}/{{ debian_image_file }} {{ vm_storage }}"
+      register: disk_import
+
+    - name: Configure VM disks
+      command: >
+        qm set {{ vm_id }}
+        --efidisk0 {{ vm_storage }}:{{ efi_disk }},efitype=4m
+        --scsi0 {{ vm_storage }}:vm-{{ vm_id }}-disk-1,cache=writethrough,size={{ vm_disk_size }}
+        --boot order=scsi0
+      register: disk_config
+
+    - name: Set VM agent configuration
+      command: "qm set {{ vm_id }} --agent enabled=1"
+      when: vm_enable_agent
+      register: agent_config
+
+    - name: Add Cloud-init drive
+      command: "qm set {{ vm_id }} --ide2 {{ vm_storage }}:cloudinit"
+      register: cloudinit_drive
+
+    - name: Configure Cloud-init settings
+      command: >
+        qm set {{ vm_id }}
+        --ciuser "{{ cloud_init_user }}"
+        --cipassword "{{ cloud_init_password }}"
+        {% if ssh_keys %}--sshkeys "{{ ssh_keys | urlencode }}"{% endif %}
+        --ipconfig0 ip=dhcp
+      register: cloudinit_config
+
+    - name: Clean up temporary directory
+      file:
+        path: "{{ temp_dir }}"
+        state: absent
+
+    - name: Start VM if requested
+      command: "qm start {{ vm_id }}"
+      when: vm_start_after_creation
+      register: vm_start
+
+    - name: Display VM information
+      debug:
+        msg:
+          - "VM '{{ vm_name }}' created successfully with Cloud-init!"
+          - "VM ID: {{ vm_id }}"
+          - "Memory: {{ vm_memory }}MB"
+          - "CPU Cores: {{ vm_cores }}"
+          - "Disk Size: {{ vm_disk_size }}"
+          - "Storage: {{ vm_storage }}"
+          - "Network: {{ vm_bridge }}"
+          - "MAC Address: {{ vm_mac }}"
+          - "Cloud-init User: {{ cloud_init_user }}"
+          - "Cloud-init Password: {{ cloud_init_password }}"
+          - "{{ 'VM started automatically' if vm_start_after_creation else 'VM created but not started' }}"
+
+    - name: Show next steps
+      debug:
+        msg:
+          - "Next steps:"
+          - "1. Wait for the VM to boot and Cloud-init to configure it (if started)"
+          - "2. Check VM console: qm terminal {{ vm_id }}"
+          - "3. Get VM status: qm status {{ vm_id }}"
+          - "4. SSH access will be configured automatically via Cloud-init"
+          - "5. Login with: {{ cloud_init_user }}/{{ cloud_init_password }}"
+          - "6. VM will get IP via DHCP - check with: qm guest cmd {{ vm_id }} network-get-interfaces"

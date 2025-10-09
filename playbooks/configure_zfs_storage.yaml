@@ -1,0 +1,72 @@
+---
+- name: Configure ZFS storage in Proxmox
+  hosts: proxmox_hosts
+  become: yes
+  vars:
+    pool_name: "tank"
+    storage_name: "tank-vms"
+
+  tasks:
+    - name: Check if ZFS pool exists
+      shell: "zpool list {{ pool_name }}"
+      register: pool_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if ZFS pool doesn't exist
+      fail:
+        msg: "ZFS pool '{{ pool_name }}' does not exist. Please create it first."
+      when: pool_check.rc != 0
+
+    - name: Create ZFS dataset for VMs
+      command: "zfs create {{ pool_name }}/vms"
+      register: dataset_creation
+      failed_when:
+        - dataset_creation.rc != 0
+        - "'dataset already exists' not in dataset_creation.stderr"
+
+    - name: Set ZFS properties for VM dataset
+      command: "{{ item }}"
+      loop:
+        - "zfs set compression=lz4 {{ pool_name }}/vms"
+        - "zfs set atime=off {{ pool_name }}/vms"
+        - "zfs set recordsize=64K {{ pool_name }}/vms"
+        - "zfs set logbias=throughput {{ pool_name }}/vms"
+
+    - name: Check if storage is already configured in Proxmox
+      shell: "pvesm status --storage {{ storage_name }}"
+      register: storage_check
+      failed_when: false
+      changed_when: false
+
+    - name: Add ZFS storage to Proxmox configuration
+      lineinfile:
+        path: /etc/pve/storage.cfg
+        line: |
+
+          zfspool: {{ storage_name }}
+                  pool {{ pool_name }}/vms
+                  content images,rootdir
+                  nodes {{ ansible_hostname }}
+        insertafter: EOF
+      when: storage_check.rc != 0
+
+    - name: Verify storage configuration
+      command: "pvesm status --storage {{ storage_name }}"
+      register: storage_status
+
+    - name: Display storage status
+      debug:
+        var: storage_status.stdout_lines
+
+    - name: Display available storage
+      command: "pvesm list {{ storage_name }}"
+      register: storage_list
+      changed_when: false
+
+    - name: Show storage details
+      debug:
+        msg:
+          - "ZFS storage '{{ storage_name }}' configured successfully!"
+          - "Dataset: {{ pool_name }}/vms"
+          - "Use storage ID '{{ storage_name }}' in VM configurations"
