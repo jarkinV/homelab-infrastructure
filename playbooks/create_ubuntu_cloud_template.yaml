@@ -3,6 +3,9 @@
   hosts: proxmox
   become: true
 
+  vars_files:
+    - ../vars/secrets.yml
+
   vars:
     # VM Configuration
     vm_id: 8000
@@ -18,6 +21,8 @@
 
     # Storage Configuration
     storage: local-lvm
+    snippets_storage: local
+    snippets_dir: /var/lib/vz/snippets
 
     # Network Configuration
     network_bridge: vmbr0
@@ -26,7 +31,33 @@
     ci_user: ubuntu
     ci_password: ubuntu
 
+    # Cloud-Init user-data content (templated)
+    cloud_init_user_data: |
+      #cloud-config
+      ssh_pwauth: true
+      ssh_authorized_keys:
+      {% for key in ssh_public_keys %}
+        - {{ key }}
+      {% endfor %}
+      packages:
+        - qemu-guest-agent
+      runcmd:
+        - systemctl start qemu-guest-agent
+        - systemctl enable qemu-guest-agent
+
   tasks:
+    - name: Ensure snippets directory exists
+      ansible.builtin.file:
+        path: "{{ snippets_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create cloud-init user-data snippet
+      ansible.builtin.copy:
+        content: "{{ cloud_init_user_data }}"
+        dest: "{{ snippets_dir }}/ubuntu-cloud-init-{{ vm_id }}.yaml"
+        mode: '0644'
+
     - name: Download Ubuntu cloud image
       ansible.builtin.get_url:
         url: "{{ cloud_image_url }}"
@@ -108,6 +139,18 @@
         cmd: "qm set {{ vm_id }} --ipconfig0 ip=dhcp,ip6=dhcp"
       register: ci_network_config
       changed_when: ci_network_config.rc == 0
+
+    - name: Configure cloud-init custom user-data snippet
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --cicustom user={{ snippets_storage }}:snippets/ubuntu-cloud-init-{{ vm_id }}.yaml"
+      register: ci_custom_config
+      changed_when: ci_custom_config.rc == 0
+
+    - name: Enable QEMU guest agent
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --agent enabled=1"
+      register: agent_config
+      changed_when: agent_config.rc == 0
 
     - name: Convert VM to template
       ansible.builtin.command:

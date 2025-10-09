@@ -64,6 +64,10 @@ inventory_prod.ini
 *_secrets.yml
 *_secrets.yaml
 
+# Ansible Vault files with secrets
+vars/secrets.yml
+vars/secrets.yaml
+
 # Terraform (if used alongside)
 *.tfstate
 *.tfstate.*
