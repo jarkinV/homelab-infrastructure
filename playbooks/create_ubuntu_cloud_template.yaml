@@ -1,0 +1,126 @@
+---
+- name: Create Ubuntu Cloud-Init VM Template on Proxmox
+  hosts: proxmox
+  become: true
+
+  vars:
+    # VM Configuration
+    vm_id: 8000
+    vm_name: ubuntu-cloud
+    vm_memory: 2048
+    vm_cores: 2
+
+    # Ubuntu Cloud Image
+    ubuntu_version: noble
+    cloud_image_url: "https://cloud-images.ubuntu.com/{{ ubuntu_version }}/current/{{ ubuntu_version }}-server-cloudimg-amd64.img"
+    cloud_image_file: "{{ ubuntu_version }}-server-cloudimg-amd64.img"
+    download_path: "/tmp/{{ cloud_image_file }}"
+
+    # Storage Configuration
+    storage: local-lvm
+
+    # Network Configuration
+    network_bridge: vmbr0
+
+    # Cloud-Init Credentials
+    ci_user: ubuntu
+    ci_password: ubuntu
+
+  tasks:
+    - name: Download Ubuntu cloud image
+      ansible.builtin.get_url:
+        url: "{{ cloud_image_url }}"
+        dest: "{{ download_path }}"
+        mode: '0644'
+      register: download_result
+
+    - name: Check if VM already exists
+      ansible.builtin.command:
+        cmd: "qm status {{ vm_id }}"
+      register: vm_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Destroy existing VM if present
+      ansible.builtin.command:
+        cmd: "qm destroy {{ vm_id }} --purge"
+      when: vm_exists.rc == 0
+
+    - name: Create VM
+      ansible.builtin.command:
+        cmd: >
+          qm create {{ vm_id }}
+          --memory {{ vm_memory }}
+          --cores {{ vm_cores }}
+          --name {{ vm_name }}
+          --net0 virtio,bridge={{ network_bridge }}
+      register: vm_create
+      changed_when: vm_create.rc == 0
+
+    - name: Import disk to VM
+      ansible.builtin.command:
+        cmd: "qm disk import {{ vm_id }} {{ download_path }} {{ storage }}"
+      register: disk_import
+      changed_when: disk_import.rc == 0
+
+    - name: Attach imported disk to VM as SCSI drive
+      ansible.builtin.command:
+        cmd: >
+          qm set {{ vm_id }}
+          --scsihw virtio-scsi-pci
+          --scsi0 {{ storage }}:vm-{{ vm_id }}-disk-0
+      register: scsi_attach
+      changed_when: scsi_attach.rc == 0
+
+    - name: Add cloud-init drive
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --ide2 {{ storage }}:cloudinit"
+      register: cloudinit_drive
+      changed_when: cloudinit_drive.rc == 0
+
+    - name: Set boot disk
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --boot c --bootdisk scsi0"
+      register: boot_config
+      changed_when: boot_config.rc == 0
+
+    - name: Configure serial console
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --serial0 socket --vga serial0"
+      register: serial_config
+      changed_when: serial_config.rc == 0
+
+    - name: Set cloud-init user
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --ciuser {{ ci_user }}"
+      register: ci_user_config
+      changed_when: ci_user_config.rc == 0
+
+    - name: Set cloud-init password
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --cipassword {{ ci_password }}"
+      register: ci_password_config
+      changed_when: ci_password_config.rc == 0
+      no_log: true
+
+    - name: Configure cloud-init networking (DHCP for IPv4 and IPv6)
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --ipconfig0 ip=dhcp,ip6=dhcp"
+      register: ci_network_config
+      changed_when: ci_network_config.rc == 0
+
+    - name: Convert VM to template
+      ansible.builtin.command:
+        cmd: "qm template {{ vm_id }}"
+      register: template_convert
+      changed_when: template_convert.rc == 0
+
+    - name: Clean up downloaded cloud image
+      ansible.builtin.file:
+        path: "{{ download_path }}"
+        state: absent
+      when: download_result.changed
+
+    - name: Display success message
+      ansible.builtin.debug:
+        msg: "Ubuntu cloud-init template (VM ID: {{ vm_id }}) created successfully!"
