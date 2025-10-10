@@ -4,8 +4,8 @@
   become: true
 
   vars_files:
-    - ../vars/global.yml
-    - ../vars/secrets.yml
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
 
   vars:
     # VM Configuration (uses global template_vm_id_ubuntu_cloud)
