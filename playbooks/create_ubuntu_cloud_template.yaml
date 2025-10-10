@@ -35,7 +35,6 @@
     # Cloud-Init user-data content (templated)
     cloud_init_user_data: |
       #cloud-config
-      ssh_pwauth: true
       ssh_authorized_keys:
       {% for key in ssh_public_keys %}
         - {{ key }}

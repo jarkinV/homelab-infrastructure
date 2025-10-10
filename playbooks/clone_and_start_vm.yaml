@@ -1,0 +1,97 @@
+---
+- name: Clone VM from Ubuntu Cloud Template and Start
+  hosts: proxmox
+  become: true
+
+  vars_files:
+    - ../vars/global.yml
+
+  vars:
+    # VM to clone
+    source_template_id: "{{ template_vm_id_ubuntu_cloud }}"
+
+    # New VM configuration (customize these for each deployment)
+    new_vm_id: 100
+    new_vm_name: "ubuntu-vm-{{ new_vm_id }}"
+
+    # VM resources (optional overrides)
+    vm_memory: 8192
+    vm_cores: 3
+
+    # Storage for cloned VM
+    vm_storage: "{{ proxmox_storage_vm }}"
+
+  tasks:
+    - name: Check if VM ID already exists
+      ansible.builtin.command:
+        cmd: "qm status {{ new_vm_id }}"
+      register: vm_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if VM already exists
+      ansible.builtin.fail:
+        msg: "VM {{ new_vm_id }} already exists. Please use a different VM ID or destroy the existing VM first."
+      when: vm_exists.rc == 0
+
+    - name: Clone VM from template
+      ansible.builtin.command:
+        cmd: >
+          qm clone {{ source_template_id }} {{ new_vm_id }}
+          --name {{ new_vm_name }}
+          --full
+          --storage {{ vm_storage }}
+      register: clone_result
+      changed_when: clone_result.rc == 0
+
+    - name: Configure VM resources (if different from template)
+      ansible.builtin.command:
+        cmd: >
+          qm set {{ new_vm_id }}
+          --memory {{ vm_memory }}
+          --cores {{ vm_cores }}
+      register: vm_config
+      changed_when: vm_config.rc == 0
+      when: vm_memory != default_vm_memory or vm_cores != default_vm_cores
+
+    - name: Start the cloned VM
+      ansible.builtin.command:
+        cmd: "qm start {{ new_vm_id }}"
+      register: vm_start
+      changed_when: vm_start.rc == 0
+
+    - name: Wait for VM to get IP address (requires guest agent)
+      ansible.builtin.shell:
+        cmd: |
+          qm guest cmd {{ new_vm_id }} network-get-interfaces 2>/dev/null | \
+          jq -r '.[] | select(.name != "lo") | .["ip-addresses"][]? | select(.["ip-address-type"] == "ipv4") | .["ip-address"]' 2>/dev/null | \
+          head -n 1
+      register: vm_network
+      until: vm_network.stdout != "" and vm_network.rc == 0
+      retries: 30
+      delay: 5
+      failed_when: false
+      changed_when: false
+
+    - name: Set VM IP fact
+      ansible.builtin.set_fact:
+        vm_ip_address: "{{ vm_network.stdout }}"
+      when: vm_network.stdout is defined and vm_network.stdout != ""
+
+    - name: Display VM information
+      ansible.builtin.debug:
+        msg: |
+          VM {{ new_vm_name }} (ID: {{ new_vm_id }}) has been created and started!
+          Template source: {{ source_template_id }}
+          Memory: {{ vm_memory }} MB
+          Cores: {{ vm_cores }}
+          {% if vm_ip_address is defined and vm_ip_address != '' %}
+          IP Address: {{ vm_ip_address }}
+
+          You can SSH to the VM with:
+            ssh ubuntu@{{ vm_ip_address }}
+          {% else %}
+          IP Address: Not yet available (guest agent may still be starting)
+
+          Check IP manually with: qm guest cmd {{ new_vm_id }} network-get-interfaces
+          {% endif %}
