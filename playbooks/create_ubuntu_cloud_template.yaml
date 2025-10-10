@@ -4,14 +4,15 @@
   become: true
 
   vars_files:
+    - ../vars/global.yml
     - ../vars/secrets.yml
 
   vars:
-    # VM Configuration
-    vm_id: 8000
+    # VM Configuration (uses global template_vm_id_ubuntu_cloud)
+    vm_id: "{{ template_vm_id_ubuntu_cloud }}"
     vm_name: ubuntu-cloud
-    vm_memory: 2048
-    vm_cores: 2
+    vm_memory: "{{ default_vm_memory }}"
+    vm_cores: "{{ default_vm_cores }}"
 
     # Ubuntu Cloud Image
     ubuntu_version: noble
@@ -19,13 +20,13 @@
     cloud_image_file: "{{ ubuntu_version }}-server-cloudimg-amd64.img"
     download_path: "/tmp/{{ cloud_image_file }}"
 
-    # Storage Configuration
-    storage: local-lvm
-    snippets_storage: local
-    snippets_dir: /var/lib/vz/snippets
+    # Storage Configuration (uses global vars)
+    storage: "{{ proxmox_storage_vm }}"
+    snippets_storage: "{{ proxmox_storage_snippets }}"
+    snippets_dir: "{{ proxmox_snippets_dir }}"
 
-    # Network Configuration
-    network_bridge: vmbr0
+    # Network Configuration (uses global var)
+    network_bridge: "{{ proxmox_network_bridge }}"
 
     # Cloud-Init Credentials
     ci_user: ubuntu

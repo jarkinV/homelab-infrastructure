@@ -1,0 +1,17 @@
+---
+# Global Variables - Non-sensitive configuration shared across playbooks
+
+# VM Template IDs
+template_vm_id_ubuntu_cloud: 8000
+
+# Storage Configuration
+proxmox_storage_vm: local-lvm
+proxmox_storage_snippets: local
+proxmox_snippets_dir: /var/lib/vz/snippets
+
+# Network Configuration
+proxmox_network_bridge: vmbr0
+
+# Default VM Configuration
+default_vm_memory: 2048
+default_vm_cores: 2
