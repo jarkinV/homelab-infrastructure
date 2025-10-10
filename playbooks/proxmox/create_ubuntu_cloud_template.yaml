@@ -152,6 +152,12 @@
       register: agent_config
       changed_when: agent_config.rc == 0
 
+    - name: Enable start at boot
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} --onboot 1"
+      register: onboot_config
+      changed_when: onboot_config.rc == 0
+
     - name: Convert VM to template
       ansible.builtin.command:
         cmd: "qm template {{ vm_id }}"

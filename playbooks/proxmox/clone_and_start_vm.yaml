@@ -65,6 +65,13 @@
       changed_when: vm_config.rc == 0
       when: vm_memory != default_vm_memory or vm_cores != default_vm_cores
 
+    - name: Enable start at boot
+      ansible.builtin.command:
+        cmd: "qm set {{ new_vm_id }} --onboot 1"
+      register: onboot_config
+      changed_when: onboot_config.rc == 0
+      failed_when: onboot_config.rc != 0
+
     - name: Start the cloned VM
       ansible.builtin.command:
         cmd: "qm start {{ new_vm_id }}"
