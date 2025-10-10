@@ -5,8 +5,8 @@
 vms:
   100:
     name: ubuntu-vm-100
-    ip: 192.168.8.174
+    ip: 192.168.8.128
     memory: 8192
     cores: 3
     template_source: 8000
-    created: 2025-10-10T00:27:42Z
+    created: 2025-10-10T00:41:32Z
