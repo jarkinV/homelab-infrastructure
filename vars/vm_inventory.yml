@@ -1,0 +1,12 @@
+---
+# VM Inventory - Dynamically managed VMs
+# This file is auto-updated by playbooks when VMs are created
+
+vms:
+  100:
+    name: ubuntu-vm-100
+    ip: 192.168.8.174
+    memory: 8192
+    cores: 3
+    template_source: 8000
+    created: 2025-10-10T00:27:42Z

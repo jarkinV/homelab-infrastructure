@@ -1,0 +1,35 @@
+---
+- name: Example - Using VM Inventory
+  hosts: proxmox
+  become: true
+
+  vars_files:
+    - ../vars/vm_inventory.yml
+
+  tasks:
+    - name: Display all VMs in inventory
+      ansible.builtin.debug:
+        msg: |
+          VM ID: {{ item.key }}
+          Name: {{ item.value.name }}
+          IP: {{ item.value.ip }}
+          Memory: {{ item.value.memory }} MB
+          Cores: {{ item.value.cores }}
+          Created: {{ item.value.created }}
+      loop: "{{ vms | dict2items }}"
+
+    - name: Example - Get specific VM IP by ID
+      ansible.builtin.debug:
+        msg: "VM 100 IP address: {{ vms['100'].ip }}"
+      when: "'100' in vms"
+
+    - name: Example - SSH to a specific VM
+      ansible.builtin.command:
+        cmd: "ssh -o StrictHostKeyChecking=no ubuntu@{{ vms['100'].ip }} hostname"
+      when: "'100' in vms and vms['100'].ip != 'pending'"
+      register: ssh_result
+
+    - name: Display SSH result
+      ansible.builtin.debug:
+        var: ssh_result.stdout
+      when: ssh_result is defined and ssh_result.stdout is defined

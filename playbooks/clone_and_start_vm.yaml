@@ -78,6 +78,42 @@
         vm_ip_address: "{{ vm_network.stdout }}"
       when: vm_network.stdout is defined and vm_network.stdout != ""
 
+    - name: Load existing VM inventory
+      ansible.builtin.include_vars:
+        file: ../vars/vm_inventory.yml
+        name: vm_inventory
+
+    - name: Update VM inventory with new VM
+      ansible.builtin.copy:
+        content: |
+          ---
+          # VM Inventory - Dynamically managed VMs
+          # This file is auto-updated by playbooks when VMs are created
+
+          vms:
+          {% for vm_id, vm_info in vm_inventory.vms.items() %}
+          {% if vm_id | string != new_vm_id | string %}
+            {{ vm_id }}:
+              name: {{ vm_info.name }}
+              ip: {{ vm_info.ip }}
+              memory: {{ vm_info.memory }}
+              cores: {{ vm_info.cores }}
+              template_source: {{ vm_info.template_source }}
+              created: {{ vm_info.created }}
+          {% endif %}
+          {% endfor %}
+            {{ new_vm_id }}:
+              name: {{ new_vm_name }}
+              ip: {{ vm_ip_address | default('pending') }}
+              memory: {{ vm_memory }}
+              cores: {{ vm_cores }}
+              template_source: {{ source_template_id }}
+              created: {{ ansible_date_time.iso8601 }}
+        dest: ../vars/vm_inventory.yml
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+
     - name: Display VM information
       ansible.builtin.debug:
         msg: |
