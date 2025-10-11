@@ -1,0 +1,66 @@
+---
+- name: Attach ZFS datasets to Ubuntu VM via 9p filesystem
+  hosts: proxmox_hosts
+  become: true
+
+  vars:
+    vm_id: 100
+    pool_name: "tank"
+
+    # Docker apps to attach
+    docker_apps:
+      - actual
+      - homepage
+      - immich
+
+  tasks:
+    - name: Check if VM exists
+      ansible.builtin.command:
+        cmd: "qm status {{ vm_id }}"
+      register: vm_status
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if VM doesn't exist
+      ansible.builtin.fail:
+        msg: "VM {{ vm_id }} does not exist."
+      when: vm_status.rc != 0
+
+    - name: Get current VM configuration
+      ansible.builtin.command:
+        cmd: "qm config {{ vm_id }}"
+      register: vm_config
+      changed_when: false
+
+    - name: Build 9p filesystem arguments
+      ansible.builtin.set_fact:
+        fsdev_args: "{{ fsdev_args | default([]) + ['-fsdev local,id=' + item + ',path=/' + pool_name + '/docker/' + item + ',security_model=passthrough -device virtio-9p-pci,fsdev=' + item + ',mount_tag=' + item] }}"
+      loop: "{{ docker_apps }}"
+
+    - name: Display what will be configured
+      ansible.builtin.debug:
+        msg:
+          - "Will configure 9p shares for VM {{ vm_id }}:"
+          - "{{ fsdev_args | join(' ') }}"
+
+    - name: Add 9p filesystem shares to VM via args
+      ansible.builtin.command:
+        cmd: "qm set {{ vm_id }} -args '{{ fsdev_args | join(' ') }}'"
+      register: args_set
+
+    - name: Display configuration summary
+      ansible.builtin.debug:
+        msg:
+          - "9p filesystem shares configured for VM {{ vm_id }}"
+          - "{{ docker_apps | length }} datasets attached"
+          - ""
+          - "After starting the VM, mount inside Ubuntu with:"
+          - "{% for app in docker_apps %}"
+          - "  sudo mkdir -p /mnt/docker/{{ app }}"
+          - "  sudo mount -t 9p -o trans=virtio,version=9p2000.L {{ app }} /mnt/docker/{{ app }}"
+          - "{% endfor %}"
+          - ""
+          - "Add to /etc/fstab for persistence:"
+          - "{% for app in docker_apps %}"
+          - "  {{ app }} /mnt/docker/{{ app }} 9p trans=virtio,version=9p2000.L,_netdev 0 0"
+          - "{% endfor %}"

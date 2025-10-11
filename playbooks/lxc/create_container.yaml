@@ -1,0 +1,104 @@
+---
+- name: Create Ubuntu LXC Container on Proxmox
+  hosts: proxmox_hosts
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
+
+  vars:
+    # Container configuration
+    ct_id: 222
+    ct_hostname: docker
+    ct_password: "{{ ct_password }}"
+
+    # Template
+    ct_template: "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
+
+    # Resources
+    ct_cores: 3
+    ct_memory: 8192
+    ct_swap: 2048
+    ct_disk_size: 50
+    ct_disk_storage: "local-lvm"
+
+    # Network
+    ct_network_bridge: "{{ proxmox_network_bridge }}"  # vmbr0 from global.yml
+    ct_ip_address: "192.168.8.222/24"
+    ct_gateway: "192.168.8.1"
+
+    # Features
+    ct_unprivileged: false  # Privileged container (needed for Docker)
+    ct_nesting: true        # Enable nesting (needed for Docker)
+    ct_start_on_boot: true
+
+  tasks:
+    - name: Check if container already exists
+      ansible.builtin.command:
+        cmd: "pct status {{ ct_id }}"
+      register: ct_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if container already exists
+      ansible.builtin.fail:
+        msg: "Container {{ ct_id }} already exists. Please use a different CT ID or destroy the existing container first."
+      when: ct_exists.rc == 0
+
+    - name: Create temporary SSH keys file
+      ansible.builtin.copy:
+        content: "{{ ssh_public_keys | join('\n') }}"
+        dest: "/tmp/ct-{{ ct_id }}-ssh-keys.pub"
+        mode: '0600'
+
+    - name: Create LXC container
+      ansible.builtin.command:
+        cmd: >
+          pct create {{ ct_id }} {{ ct_template }}
+          --hostname {{ ct_hostname }}
+          --cores {{ ct_cores }}
+          --memory {{ ct_memory }}
+          --swap {{ ct_swap }}
+          --rootfs {{ ct_disk_storage }}:{{ ct_disk_size }}
+          --net0 name=eth0,bridge={{ ct_network_bridge }},ip={{ ct_ip_address }},gw={{ ct_gateway }},firewall=1
+          --unprivileged {{ '0' if not ct_unprivileged else '1' }}
+          --features nesting={{ '1' if ct_nesting else '0' }}
+          --onboot {{ '1' if ct_start_on_boot else '0' }}
+          --password {{ ct_password }}
+          --ssh-public-keys /tmp/ct-{{ ct_id }}-ssh-keys.pub
+      register: ct_create
+      changed_when: ct_create.rc == 0
+
+    - name: Remove temporary SSH keys file
+      ansible.builtin.file:
+        path: "/tmp/ct-{{ ct_id }}-ssh-keys.pub"
+        state: absent
+
+    - name: Start the container
+      ansible.builtin.command:
+        cmd: "pct start {{ ct_id }}"
+      register: ct_start
+      changed_when: ct_start.rc == 0
+
+    - name: Wait for container to be ready
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Display container information
+      ansible.builtin.debug:
+        msg:
+          - "LXC Container {{ ct_hostname }} (ID: {{ ct_id }}) has been created and started!"
+          - "Hostname: {{ ct_hostname }}"
+          - "IP Address: {{ ct_ip_address }}"
+          - "Cores: {{ ct_cores }}"
+          - "Memory: {{ ct_memory }} MB"
+          - "Swap: {{ ct_swap }} MB"
+          - "Disk: {{ ct_disk_size }} GB"
+          - "Unprivileged: {{ ct_unprivileged }}"
+          - "Nesting enabled: {{ ct_nesting }}"
+          - ""
+          - "You can access the container with:"
+          - "  pct enter {{ ct_id }}"
+          - "Or SSH to:"
+          - "  ssh root@{{ ct_ip_address.split('/')[0] }}"
