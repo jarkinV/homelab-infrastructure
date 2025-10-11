@@ -1,5 +1,5 @@
 ---
-- name: Create Ubuntu LXC Container on Proxmox
+- name: Create Debian LXC Container on Proxmox
   hosts: proxmox_hosts
   become: true
 
@@ -14,7 +14,7 @@
     ct_password: "{{ ct_password }}"
 
     # Template
-    ct_template: "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
+    ct_template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
     # Resources
     ct_cores: 3
