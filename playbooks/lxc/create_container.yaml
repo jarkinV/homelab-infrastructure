@@ -10,7 +10,7 @@
   vars:
     # Container configuration
     ct_id: 222
-    ct_hostname: docker
+    ct_hostname: debian-docker
     ct_password: "{{ ct_password }}"
 
     # Template

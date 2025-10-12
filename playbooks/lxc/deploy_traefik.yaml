@@ -85,10 +85,12 @@
               acme:
                 email: yvarshavskyi@proton.me
                 storage: acme.json
-                #caServer: "https://acme-v02.api.letsencrypt.org/directory"
-                caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
+                caServer: "https://acme-v02.api.letsencrypt.org/directory"
+                #caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
                 dnsChallenge:
                   provider: cloudflare
+                  disablePropagationCheck: true
+                  delayBeforeCheck: 60
                   resolvers:
                     - "1.1.1.1:53"
                     - "1.0.0.1:53"
@@ -118,7 +120,7 @@
         content: |
           services:
             reverse-proxy:
-              image: traefik:v3.2
+              image: traefik:v3.5.3
               container_name: traefik
               restart: unless-stopped
               security_opt:
