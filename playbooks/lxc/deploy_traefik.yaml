@@ -55,7 +55,7 @@
             checkNewVersion: false
             sendAnonymousUsage: false
           log:
-            level: ERROR
+            level: DEBUG
             format: common
             filePath: /var/log/traefik/traefik.log
           accesslog:
