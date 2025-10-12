@@ -1,0 +1,182 @@
+---
+- name: Deploy Traefik with Docker Compose
+  hosts: lxc_containers
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
+
+  vars:
+    traefik_base_dir: /opt/traefik
+    traefik_config_dir: /opt/traefik/config
+    traefik_log_dir: /opt/traefik/logs
+    docker_networks:
+      - proxy
+      - tunnel
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create Traefik base directory
+      ansible.builtin.file:
+        path: "{{ traefik_base_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create Traefik configuration directory
+      ansible.builtin.file:
+        path: "{{ traefik_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create Traefik log directory
+      ansible.builtin.file:
+        path: "{{ traefik_log_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create traefik.yaml configuration file
+      ansible.builtin.copy:
+        dest: "{{ traefik_config_dir }}/traefik.yaml"
+        mode: '0644'
+        content: |
+          global:
+            checkNewVersion: false
+            sendAnonymousUsage: false
+          log:
+            level: ERROR
+            format: common
+            filePath: /var/log/traefik/traefik.log
+          accesslog:
+            format: common
+            filePath: /var/log/traefik/access.log
+          api:
+            dashboard: true
+            debug: true
+            disableDashboardAd: true
+          serversTransport:
+            insecureSkipVerify: true
+          entryPoints:
+            http:
+              address: :80
+              http:
+                redirections:
+                  entryPoint:
+                    to: https
+                    scheme: https
+            https:
+              address: :443
+          providers:
+            docker:
+              exposedByDefault: false
+          certificatesResolvers:
+            cloudflare:
+              acme:
+                email: yvarshavskyi@proton.me
+                storage: acme.json
+                caServer: "https://acme-v02.api.letsencrypt.org/directory"
+          #      caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
+                dnsChallenge:
+                  provider: cloudflare
+                  resolvers:
+                    - "1.1.1.1:53"
+                    - "1.0.0.1:53"
+
+    - name: Create acme.json file with proper permissions
+      ansible.builtin.file:
+        path: "{{ traefik_config_dir }}/acme.json"
+        state: touch
+        mode: '0600'
+        modification_time: preserve
+        access_time: preserve
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.copy:
+        dest: "{{ traefik_base_dir }}/.env"
+        mode: '0600'
+        content: |
+          CF_DNS_API_TOKEN={{ cf_dns_api_token }}
+          TRAEFIK_DASHBOARD_CREDENTIALS={{ traefik_dashboard_credentials }}
+          DOMAIN={{ domain }}
+
+    - name: Create docker-compose.yml for Traefik
+      ansible.builtin.copy:
+        dest: "{{ traefik_base_dir }}/docker-compose.yml"
+        mode: '0644'
+        content: |
+          services:
+            reverse-proxy:
+              image: traefik:v3.2
+              container_name: traefik
+              restart: unless-stopped
+              security_opt:
+                - no-new-privileges:true
+              ports:
+                - "80:80"
+                - "443:443"
+              environment:
+                - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+                - TRAEFIK_DASHBOARD_CREDENTIALS=${TRAEFIK_DASHBOARD_CREDENTIALS}
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - /var/run/docker.sock:/var/run/docker.sock
+                - {{ traefik_config_dir }}/traefik.yaml:/etc/traefik/traefik.yaml:ro
+                - {{ traefik_config_dir }}/acme.json:/acme.json
+                - {{ traefik_log_dir }}:/var/log/traefik
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.traefik.entrypoints=http"
+                - "traefik.http.routers.traefik.rule=Host(`traefik.local.${DOMAIN}`)"
+                - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
+                - "traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme=https"
+                - "traefik.http.middlewares.sslheader.headers.customrequestheaders.X-Forwarded-Proto=https"
+                - "traefik.http.routers.traefik.middlewares=traefik-https-redirect"
+                - "traefik.http.routers.traefik-secure.entrypoints=https"
+                - "traefik.http.routers.traefik-secure.rule=Host(`traefik.local.${DOMAIN}`)"
+                - "traefik.http.routers.traefik-secure.middlewares=traefik-auth"
+                - "traefik.http.routers.traefik-secure.tls=true"
+                - "traefik.http.routers.traefik-secure.tls.certresolver=cloudflare"
+                - "traefik.http.routers.traefik-secure.tls.domains[0].main=${DOMAIN}"
+                - "traefik.http.routers.traefik-secure.tls.domains[0].sans=*.${DOMAIN}"
+                - "traefik.http.routers.traefik-secure.tls.domains[1].main=local.${DOMAIN}"
+                - "traefik.http.routers.traefik-secure.tls.domains[1].sans=*.local.${DOMAIN}"
+                - "traefik.http.routers.traefik-secure.service=api@internal"
+              networks:
+                - proxy
+                - tunnel
+
+          networks:
+            proxy:
+                external: true
+            tunnel:
+                external: true
+
+    - name: Deploy Traefik with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ traefik_base_dir }}"
+        state: present
+        pull: "always"
+      register: traefik_deploy
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Traefik has been successfully deployed!"
+          - "Base directory: {{ traefik_base_dir }}"
+          - "Configuration directory: {{ traefik_config_dir }}"
+          - "Log directory: {{ traefik_log_dir }}"
+          - ""
+          - "Access Traefik dashboard at: https://traefik.local.{{ domain }}"
+          - ""
+          - "Container status: {{ 'Running' if traefik_deploy.changed else 'Already running' }}"
