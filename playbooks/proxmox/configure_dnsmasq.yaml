@@ -13,12 +13,9 @@
       - domain: "varshavskyi.com"
         ip: "192.168.8.222"
         comment: "Main domain to Traefik"
-      - domain: ".varshavskyi.com"
+      - domain: "traefik.varshavskyi.com"
         ip: "192.168.8.222"
-        comment: "Wildcard for all subdomains to Traefik"
-      - domain: ".local.varshavskyi.com"
-        ip: "192.168.8.222"
-        comment: "Wildcard for local subdomains to Traefik"
+        comment: "Traefik subdomain"
 
   tasks:
     - name: Install dnsmasq

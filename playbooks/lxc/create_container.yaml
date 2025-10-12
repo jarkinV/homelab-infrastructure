@@ -17,8 +17,8 @@
     ct_template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
     # Resources
-    ct_cores: 3
-    ct_memory: 8192
+    ct_cores: 4
+    ct_memory: 24576
     ct_swap: 2048
     ct_disk_size: 50
     ct_disk_storage: "local-lvm"

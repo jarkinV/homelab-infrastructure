@@ -85,8 +85,8 @@
               acme:
                 email: yvarshavskyi@proton.me
                 storage: acme.json
-                caServer: "https://acme-v02.api.letsencrypt.org/directory"
-          #      caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
+                #caServer: "https://acme-v02.api.letsencrypt.org/directory"
+                caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
                 dnsChallenge:
                   provider: cloudflare
                   resolvers:
@@ -107,8 +107,9 @@
         mode: '0600'
         content: |
           CF_DNS_API_TOKEN={{ cf_dns_api_token }}
-          TRAEFIK_DASHBOARD_CREDENTIALS={{ traefik_dashboard_credentials }}
+          TRAEFIK_DASHBOARD_CREDENTIALS={{ traefik_dashboard_credentials | replace('$', '$$') }}
           DOMAIN={{ domain }}
+      register: env_file_result
 
     - name: Create docker-compose.yml for Traefik
       ansible.builtin.copy:
@@ -137,20 +138,18 @@
               labels:
                 - "traefik.enable=true"
                 - "traefik.http.routers.traefik.entrypoints=http"
-                - "traefik.http.routers.traefik.rule=Host(`traefik.local.${DOMAIN}`)"
+                - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
                 - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
                 - "traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme=https"
                 - "traefik.http.middlewares.sslheader.headers.customrequestheaders.X-Forwarded-Proto=https"
                 - "traefik.http.routers.traefik.middlewares=traefik-https-redirect"
                 - "traefik.http.routers.traefik-secure.entrypoints=https"
-                - "traefik.http.routers.traefik-secure.rule=Host(`traefik.local.${DOMAIN}`)"
+                - "traefik.http.routers.traefik-secure.rule=Host(`traefik.${DOMAIN}`)"
                 - "traefik.http.routers.traefik-secure.middlewares=traefik-auth"
                 - "traefik.http.routers.traefik-secure.tls=true"
                 - "traefik.http.routers.traefik-secure.tls.certresolver=cloudflare"
                 - "traefik.http.routers.traefik-secure.tls.domains[0].main=${DOMAIN}"
                 - "traefik.http.routers.traefik-secure.tls.domains[0].sans=*.${DOMAIN}"
-                - "traefik.http.routers.traefik-secure.tls.domains[1].main=local.${DOMAIN}"
-                - "traefik.http.routers.traefik-secure.tls.domains[1].sans=*.local.${DOMAIN}"
                 - "traefik.http.routers.traefik-secure.service=api@internal"
               networks:
                 - proxy
@@ -166,8 +165,16 @@
       community.docker.docker_compose_v2:
         project_src: "{{ traefik_base_dir }}"
         state: present
-        pull: "always"
+        pull: "missing"
       register: traefik_deploy
+
+    - name: Recreate container if .env file changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ traefik_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed
+      register: traefik_recreate
 
     - name: Display deployment status
       ansible.builtin.debug:
