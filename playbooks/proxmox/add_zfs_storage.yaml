@@ -1,0 +1,59 @@
+---
+- name: Add ZFS pool to Proxmox storage
+  hosts: proxmox_hosts
+  become: true
+
+  vars:
+    storage_id: "tank"          # Name that will appear in Proxmox UI
+    pool_name: "tank"           # ZFS pool name
+    # Content types that this storage will support
+    # Options: images (VM disks), rootdir (LXC rootfs), vztmpl, backup, iso, snippets
+    # For just mounting datasets to containers, you don't need this storage configured
+    # This is mainly if you want to create containers/VMs with rootfs on this pool
+    content_types: "rootdir,backup,snippets"
+
+  tasks:
+    - name: Check if ZFS pool exists
+      ansible.builtin.command:
+        cmd: "zpool list {{ pool_name }}"
+      register: pool_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if ZFS pool doesn't exist
+      ansible.builtin.fail:
+        msg: "ZFS pool '{{ pool_name }}' does not exist. Please create it first using create_zfs_pool.yaml"
+      when: pool_check.rc != 0
+
+    - name: Check if storage already configured in Proxmox
+      ansible.builtin.command:
+        cmd: "pvesm status -storage {{ storage_id }}"
+      register: storage_check
+      failed_when: false
+      changed_when: false
+
+    - name: Add ZFS pool to Proxmox storage
+      ansible.builtin.command:
+        cmd: "pvesm add zfspool {{ storage_id }} --pool {{ pool_name }} --content {{ content_types }}"
+      when: storage_check.rc != 0
+      register: add_storage
+
+    - name: Get storage status
+      ansible.builtin.command:
+        cmd: "pvesm status"
+      register: storage_status
+      changed_when: false
+
+    - name: Show storage configuration result
+      ansible.builtin.debug:
+        msg:
+          - "ZFS storage configuration completed!"
+          - "Storage ID: {{ storage_id }}"
+          - "Pool: {{ pool_name }}"
+          - "Content types: {{ content_types }}"
+          - ""
+          - "Current Proxmox storage:"
+
+    - name: Display storage status
+      ansible.builtin.debug:
+        var: storage_status.stdout_lines
