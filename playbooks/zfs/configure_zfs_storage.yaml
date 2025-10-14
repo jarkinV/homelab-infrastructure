@@ -8,6 +8,7 @@
 
     # Docker apps - each will get its own dataset
     docker_apps:
+      - backups
       - traefik
       - actual
       - paperless
