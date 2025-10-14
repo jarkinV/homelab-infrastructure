@@ -10,6 +10,7 @@
     docker_apps:
       - traefik
       - actual
+      - paperless
 
   tasks:
     - name: Check if ZFS pool exists

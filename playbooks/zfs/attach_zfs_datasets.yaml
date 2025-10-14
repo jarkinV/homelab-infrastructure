@@ -11,6 +11,7 @@
     docker_apps:
       - traefik
       - actual
+      - paperless
 
   tasks:
     - name: Check if container exists
