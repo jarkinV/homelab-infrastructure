@@ -1,0 +1,98 @@
+---
+- name: Deploy Actual Budget with Docker Compose
+  hosts: lxc_containers
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
+
+  vars:
+    actual_base_dir: /mnt/actual
+    docker_networks:
+      - proxy
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create Actual Budget base directory
+      ansible.builtin.file:
+        path: "{{ actual_base_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.copy:
+        dest: "{{ actual_base_dir }}/.env"
+        mode: '0600'
+        content: |
+          DATA_LOCATION={{ actual_base_dir }}
+          DOMAIN={{ domain }}
+      register: env_file_result
+
+    - name: Create compose.yaml for Actual Budget
+      ansible.builtin.copy:
+        dest: "{{ actual_base_dir }}/compose.yaml"
+        mode: '0644'
+        content: |
+          networks:
+            proxy:
+              external: true
+
+          services:
+            actual_server:
+              image: docker.io/actualbudget/actual-server:25.10.0
+              container_name: actual
+              volumes:
+                - ${DATA_LOCATION}:/data
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.actual.entrypoints=https"
+                - "traefik.http.routers.actual.rule=Host(`budget.${DOMAIN}`)"
+                - "traefik.http.routers.actual.tls=true"
+                - "traefik.http.routers.actual.tls.certresolver=cloudflare"
+                - "traefik.http.routers.actual.tls.domains[0].main=${DOMAIN}"
+                - "traefik.http.routers.actual.tls.domains[0].sans=*.${DOMAIN}"
+                - "traefik.http.services.actual.loadbalancer.server.port=5006"
+                - "traefik.docker.network=proxy"
+              restart: unless-stopped
+              security_opt:
+                - no-new-privileges:true
+              networks:
+                - proxy
+
+    - name: Deploy Actual Budget with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ actual_base_dir }}"
+        state: present
+        pull: "missing"
+      register: actual_deploy
+
+    - name: Recreate container if .env file changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ actual_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed
+      register: actual_recreate
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Actual Budget has been successfully deployed!"
+          - "Base directory: {{ actual_base_dir }}"
+          - "Data location: {{ actual_base_dir }}"
+          - ""
+          - "Access Actual Budget at: https://budget.{{ domain }}"
+          - ""
+          - "Container status: {{ 'Running' if actual_deploy.changed else 'Already running' }}"

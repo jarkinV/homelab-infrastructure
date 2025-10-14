@@ -8,20 +8,7 @@
 
     # Docker apps - each will get its own dataset
     docker_apps:
-      - actual
-#      - arr
-#      - dnsmasq
-#      - dockge
-#      - firefly
-#      - gitlab
-#      - gitlab-home
-      - homepage
-      - immich
-#      - n8n
-#      - nextcloud
-#      - ollama
-#      - paperless
-#      - renovate
+      - traefik
 
   tasks:
     - name: Check if ZFS pool exists
@@ -36,21 +23,9 @@
         msg: "ZFS pool '{{ pool_name }}' does not exist. Please create it first."
       when: pool_check.rc != 0
 
-    - name: Check if parent docker dataset exists
-      ansible.builtin.command:
-        cmd: "zfs list {{ pool_name }}/docker"
-      register: docker_dataset_check
-      failed_when: false
-      changed_when: false
-
-    - name: Create parent docker dataset with properties
-      ansible.builtin.command:
-        cmd: "zfs create -o compression=lz4 -o atime=off -o recordsize=128K {{ pool_name }}/docker"
-      when: docker_dataset_check.rc != 0
-
     - name: Check which Docker app datasets already exist
       ansible.builtin.command:
-        cmd: "zfs list {{ pool_name }}/docker/{{ item }}"
+        cmd: "zfs list {{ pool_name }}/{{ item }}"
       loop: "{{ docker_apps }}"
       register: app_dataset_checks
       failed_when: false
@@ -58,11 +33,11 @@
 
     - name: Create ZFS dataset for each Docker app with properties (if not exists)
       ansible.builtin.command:
-        cmd: "zfs create -o compression=lz4 -o atime=off {{ pool_name }}/docker/{{ item.item }}"
+        cmd: "zfs create -o compression=lz4 -o atime=off {{ pool_name }}/{{ item.item }}"
       loop: "{{ app_dataset_checks.results }}"
       when: item.rc != 0
       loop_control:
-        label: "{{ pool_name }}/docker/{{ item.item }}"
+        label: "{{ pool_name }}/{{ item.item }}"
 
     - name: List all created datasets
       ansible.builtin.command:
@@ -74,8 +49,7 @@
       ansible.builtin.debug:
         msg:
           - "ZFS Docker storage configured successfully!"
-          - "Docker parent dataset: {{ pool_name }}/docker"
-          - "Created {{ docker_apps | length }} app datasets"
+          - "Created {{ docker_apps | length }} app datasets directly in {{ pool_name }}"
           - ""
           - "All datasets:"
 

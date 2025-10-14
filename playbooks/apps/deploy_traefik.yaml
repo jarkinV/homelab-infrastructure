@@ -8,9 +8,9 @@
     - ../../vars/secrets.yml
 
   vars:
-    traefik_base_dir: /opt/traefik
-    traefik_config_dir: /opt/traefik/config
-    traefik_log_dir: /opt/traefik/logs
+    traefik_base_dir: /mnt/traefik
+    traefik_config_dir: /mnt/traefik/config
+    traefik_log_dir: /mnt/traefik/logs
     docker_networks:
       - proxy
       - tunnel
@@ -28,12 +28,6 @@
         state: present
       loop: "{{ docker_networks }}"
 
-    - name: Create Traefik base directory
-      ansible.builtin.file:
-        path: "{{ traefik_base_dir }}"
-        state: directory
-        mode: '0755'
-
     - name: Create Traefik configuration directory
       ansible.builtin.file:
         path: "{{ traefik_config_dir }}"
@@ -46,6 +40,8 @@
         state: directory
         mode: '0755'
 
+    # Staging CA server
+    # caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
     - name: Create traefik.yaml configuration file
       ansible.builtin.copy:
         dest: "{{ traefik_config_dir }}/traefik.yaml"
@@ -55,7 +51,7 @@
             checkNewVersion: false
             sendAnonymousUsage: false
           log:
-            level: DEBUG
+            level: ERROR
             format: common
             filePath: /var/log/traefik/traefik.log
           accesslog:
@@ -86,7 +82,6 @@
                 email: yvarshavskyi@proton.me
                 storage: acme.json
                 caServer: "https://acme-v02.api.letsencrypt.org/directory"
-                #caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
                 dnsChallenge:
                   provider: cloudflare
                   disablePropagationCheck: true
@@ -113,9 +108,9 @@
           DOMAIN={{ domain }}
       register: env_file_result
 
-    - name: Create docker-compose.yml for Traefik
+    - name: Create compose.yaml for Traefik
       ansible.builtin.copy:
-        dest: "{{ traefik_base_dir }}/docker-compose.yml"
+        dest: "{{ traefik_base_dir }}/compose.yaml"
         mode: '0644'
         content: |
           services:
@@ -186,6 +181,6 @@
           - "Configuration directory: {{ traefik_config_dir }}"
           - "Log directory: {{ traefik_log_dir }}"
           - ""
-          - "Access Traefik dashboard at: https://traefik.local.{{ domain }}"
+          - "Access Traefik dashboard at: https://traefik.{{ domain }}"
           - ""
           - "Container status: {{ 'Running' if traefik_deploy.changed else 'Already running' }}"

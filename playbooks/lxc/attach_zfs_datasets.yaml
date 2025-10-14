@@ -1,0 +1,142 @@
+---
+- name: Attach ZFS datasets to LXC Container
+  hosts: proxmox_hosts
+  become: true
+
+  vars:
+    ct_id: 222
+    pool_name: "tank"
+
+    # Docker apps to attach - each gets a mount point
+    docker_apps:
+      - traefik
+
+  tasks:
+    - name: Check if container exists
+      ansible.builtin.command:
+        cmd: "pct status {{ ct_id }}"
+      register: ct_status
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if container doesn't exist
+      ansible.builtin.fail:
+        msg: "Container {{ ct_id }} does not exist."
+      when: ct_status.rc != 0
+
+    - name: Check if ZFS datasets exist
+      ansible.builtin.command:
+        cmd: "zfs list {{ pool_name }}/{{ item }}"
+      loop: "{{ docker_apps }}"
+      register: dataset_checks
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if any dataset doesn't exist
+      ansible.builtin.fail:
+        msg: "ZFS dataset {{ pool_name }}/{{ item.item }} does not exist. Please run configure_zfs_storage.yaml first."
+      when: item.rc != 0
+      loop: "{{ dataset_checks.results }}"
+      loop_control:
+        label: "{{ pool_name }}/{{ item.item }}"
+
+    - name: Get current container configuration
+      ansible.builtin.command:
+        cmd: "pct config {{ ct_id }}"
+      register: ct_config
+      changed_when: false
+
+    - name: Extract existing mount points from config
+      ansible.builtin.set_fact:
+        existing_mounts: "{{ ct_config.stdout_lines | select('match', '^mp[0-9]+:.*') | list }}"
+
+    - name: Extract app names from existing mounts
+      ansible.builtin.set_fact:
+        mounted_apps: "{{ existing_mounts | map('regex_replace', '.*/' + pool_name + '/([^,]+),.*', '\\1') | list }}"
+
+    - name: Determine which apps need mount points
+      ansible.builtin.set_fact:
+        apps_needing_mounts: "{{ docker_apps | difference(mounted_apps) }}"
+
+    - name: Display which mounts need to be added
+      ansible.builtin.debug:
+        msg: |
+          Checking mount points:
+            Existing: {{ existing_mounts | length }}
+            Apps needing mounts: {{ apps_needing_mounts | length }}
+          {% if apps_needing_mounts | length > 0 %}
+            Apps to mount: {{ apps_needing_mounts | join(', ') }}
+          {% else %}
+            All mounts already configured - skipping
+          {% endif %}
+
+    - name: Find next available mount point number
+      ansible.builtin.set_fact:
+        next_mp_number: "{{ existing_mounts | map('regex_replace', '^mp([0-9]+):.*', '\\1') | map('int') | max + 1 if existing_mounts | length > 0 else 0 }}"
+      when: apps_needing_mounts | length > 0
+
+    - name: Stop container if running (required to add mount points)
+      ansible.builtin.command:
+        cmd: "pct stop {{ ct_id }}"
+      when:
+        - "'running' in ct_status.stdout"
+        - apps_needing_mounts | length > 0
+      register: ct_stopped
+
+    - name: Wait for container to stop
+      ansible.builtin.pause:
+        seconds: 5
+      when: ct_stopped is changed
+
+    - name: Add mount points for Docker apps that don't have them yet
+      ansible.builtin.command:
+        cmd: "pct set {{ ct_id }} -mp{{ next_mp_number | int + loop_index }} /{{ pool_name }}/{{ item }},mp=/mnt/{{ item }}"
+      loop: "{{ apps_needing_mounts }}"
+      loop_control:
+        index_var: loop_index
+        label: "mp{{ next_mp_number | int + loop_index }}: /{{ pool_name }}/{{ item }} -> /mnt/{{ item }}"
+      when: apps_needing_mounts | length > 0
+      register: mount_points_added
+
+    - name: Start container if we stopped it
+      ansible.builtin.command:
+        cmd: "pct start {{ ct_id }}"
+      when: ct_stopped is changed
+      register: ct_start
+
+    - name: Wait for container to start
+      ansible.builtin.pause:
+        seconds: 10
+      when: ct_stopped is changed
+
+    - name: Get final container configuration
+      ansible.builtin.command:
+        cmd: "pct config {{ ct_id }}"
+      register: final_ct_config
+      changed_when: false
+
+    - name: Extract all current mount points
+      ansible.builtin.set_fact:
+        all_current_mounts: "{{ final_ct_config.stdout_lines | select('match', '^mp[0-9]+:.*') | list }}"
+
+    - name: Display mount configuration summary
+      ansible.builtin.debug:
+        msg: |
+          Container {{ ct_id }} mount configuration:
+
+          Total mount points: {{ all_current_mounts | length }}
+          {% if apps_needing_mounts | length > 0 %}
+          Newly added: {{ apps_needing_mounts | length }} ({{ apps_needing_mounts | join(', ') }})
+          {% else %}
+          No changes - all requested mount points already exist
+          {% endif %}
+
+          All mount points:
+          {{ all_current_mounts | join('\n          ') }}
+
+          Inside the container, datasets are available at:
+          {% for app in docker_apps %}
+            /mnt/{{ app }}
+          {% endfor %}
+
+          You can now bind mount these paths in your Docker compose files
