@@ -9,6 +9,7 @@
     # Docker apps - each will get its own dataset
     docker_apps:
       - traefik
+      - actual
 
   tasks:
     - name: Check if ZFS pool exists

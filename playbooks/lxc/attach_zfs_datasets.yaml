@@ -10,6 +10,7 @@
     # Docker apps to attach - each gets a mount point
     docker_apps:
       - traefik
+      - actual
 
   tasks:
     - name: Check if container exists

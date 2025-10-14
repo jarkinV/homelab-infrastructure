@@ -36,7 +36,7 @@
         dest: "{{ actual_base_dir }}/.env"
         mode: '0600'
         content: |
-          DATA_LOCATION={{ actual_base_dir }}
+          DATA_LOCATION={{ actual_base_dir }}/data
           DOMAIN={{ domain }}
       register: env_file_result
 
