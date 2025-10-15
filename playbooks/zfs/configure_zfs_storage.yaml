@@ -12,6 +12,7 @@
       - traefik
       - actual
       - paperless
+      - immich
 
   tasks:
     - name: Check if ZFS pool exists
