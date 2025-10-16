@@ -1,0 +1,128 @@
+---
+- name: Create LXC Container in NAT Network (10.0.0.0/24)
+  hosts: proxmox_hosts
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
+
+  vars:
+    # Container configuration
+    ct_id: 100
+    ct_hostname: debian-docker-internal
+    ct_password: "{{ ct_password }}"
+
+    # Template
+    ct_template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
+
+    # Resources
+    ct_cores: 2
+    ct_memory: 2048
+    ct_swap: 512
+    ct_disk_size: 8
+    ct_disk_storage: "local-lvm"
+
+    # Network - NAT configuration
+    ct_network_bridge: "{{ proxmox_nat_bridge }}"  # vmbr1 from global.yml
+    ct_ip_address: "10.0.0.10/24"  # Internal NAT IP
+    ct_gateway: "10.0.0.1"  # NAT gateway
+
+    # Features
+    ct_unprivileged: false  # Privileged container (needed for Docker)
+    ct_nesting: true        # Enable nesting (needed for Docker)
+    ct_start_on_boot: true
+
+  tasks:
+    - name: Check if NAT bridge exists
+      ansible.builtin.command:
+        cmd: "ip addr show {{ ct_network_bridge }}"
+      register: bridge_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if NAT bridge does not exist
+      ansible.builtin.fail:
+        msg: |
+          NAT bridge {{ ct_network_bridge }} does not exist!
+          Please run: ansible-playbook playbooks/network/setup_nat_bridge.yaml
+      when: bridge_check.rc != 0
+
+    - name: Check if container already exists
+      ansible.builtin.command:
+        cmd: "pct status {{ ct_id }}"
+      register: ct_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if container already exists
+      ansible.builtin.fail:
+        msg: "Container {{ ct_id }} already exists. Please use a different CT ID or destroy the existing container first."
+      when: ct_exists.rc == 0
+
+    - name: Create temporary SSH keys file
+      ansible.builtin.copy:
+        content: "{{ ssh_public_keys | join('\n') }}"
+        dest: "/tmp/ct-{{ ct_id }}-ssh-keys.pub"
+        mode: '0600'
+
+    - name: Create LXC container in NAT network
+      ansible.builtin.command:
+        cmd: >
+          pct create {{ ct_id }} {{ ct_template }}
+          --hostname {{ ct_hostname }}
+          --cores {{ ct_cores }}
+          --memory {{ ct_memory }}
+          --swap {{ ct_swap }}
+          --rootfs {{ ct_disk_storage }}:{{ ct_disk_size }}
+          --net0 name=eth0,bridge={{ ct_network_bridge }},ip={{ ct_ip_address }},gw={{ ct_gateway }},firewall=1
+          --unprivileged {{ '0' if not ct_unprivileged else '1' }}
+          --features nesting={{ '1' if ct_nesting else '0' }}
+          --onboot {{ '1' if ct_start_on_boot else '0' }}
+          --password {{ ct_password }}
+          --ssh-public-keys /tmp/ct-{{ ct_id }}-ssh-keys.pub
+      register: ct_create
+      changed_when: ct_create.rc == 0
+
+    - name: Remove temporary SSH keys file
+      ansible.builtin.file:
+        path: "/tmp/ct-{{ ct_id }}-ssh-keys.pub"
+        state: absent
+
+    - name: Start the container
+      ansible.builtin.command:
+        cmd: "pct start {{ ct_id }}"
+      register: ct_start
+      changed_when: ct_start.rc == 0
+
+    - name: Wait for container to be ready
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Display container information
+      ansible.builtin.debug:
+        msg:
+          - "LXC Container {{ ct_hostname }} (ID: {{ ct_id }}) has been created in NAT network!"
+          - "Hostname: {{ ct_hostname }}"
+          - "Internal IP: {{ ct_ip_address }}"
+          - "Gateway: {{ ct_gateway }}"
+          - "Network Bridge: {{ ct_network_bridge }}"
+          - "Cores: {{ ct_cores }}"
+          - "Memory: {{ ct_memory }} MB"
+          - "Swap: {{ ct_swap }} MB"
+          - "Disk: {{ ct_disk_size }} GB"
+          - "Unprivileged: {{ ct_unprivileged }}"
+          - "Nesting enabled: {{ ct_nesting }}"
+          - ""
+          - "Network information:"
+          - "  - Container is in internal NAT network ({{ proxmox_nat_network }})"
+          - "  - Container has internet access via NAT"
+          - "  - External access requires port forwarding (configured in setup_nat_bridge.yaml)"
+          - ""
+          - "Access the container:"
+          - "  From Proxmox host: pct enter {{ ct_id }}"
+          - "  Or SSH from Proxmox: ssh root@{{ ct_ip_address.split('/')[0] }}"
+          - ""
+          - "Next steps:"
+          - "  1. Install Docker: ansible-playbook playbooks/lxc/install_docker.yaml"
+          - "  2. Deploy applications (they will be accessible via port forwarding)"
