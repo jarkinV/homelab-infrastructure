@@ -1,0 +1,75 @@
+---
+- name: Install and configure sanoid on Proxmox
+  hosts: proxmox_hosts
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: Check if sanoid is installed
+      ansible.builtin.command: which sanoid
+      register: sanoid_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install sanoid
+      ansible.builtin.apt:
+        name: sanoid
+        state: present
+        update_cache: yes
+      when: sanoid_check.rc != 0
+
+    - name: Ensure sanoid config directory exists
+      ansible.builtin.file:
+        path: /etc/sanoid
+        state: directory
+        mode: '0755'
+
+    - name: Copy sanoid configuration
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../docs/sanoid.conf"
+        dest: /etc/sanoid/sanoid.conf
+        mode: '0644'
+        backup: yes
+      register: sanoid_config
+
+    - name: Check if sanoid timer is active
+      ansible.builtin.systemd:
+        name: sanoid.timer
+      register: sanoid_timer_status
+      failed_when: false
+
+    - name: Enable and start sanoid timer
+      ansible.builtin.systemd:
+        name: sanoid.timer
+        enabled: yes
+        state: started
+      when: sanoid_timer_status.status is not defined or sanoid_timer_status.status.ActiveState != "active"
+
+    - name: Restart sanoid timer if config changed and already running
+      ansible.builtin.systemd:
+        name: sanoid.timer
+        state: restarted
+      when:
+        - sanoid_config.changed
+        - sanoid_timer_status.status is defined
+        - sanoid_timer_status.status.ActiveState == "active"
+
+    - name: Verify sanoid timer status
+      ansible.builtin.systemd:
+        name: sanoid.timer
+      register: final_status
+
+    - name: Display sanoid status
+      ansible.builtin.debug:
+        msg: "Sanoid timer is {{ final_status.status.ActiveState }} and {{ final_status.status.SubState }}"
+
+    - name: Run sanoid manually to verify configuration
+      ansible.builtin.command: sanoid --verbose --readonly --cron
+      register: sanoid_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display sanoid test results
+      ansible.builtin.debug:
+        msg: "{{ sanoid_test.stdout_lines }}"
+      when: sanoid_test.stdout_lines is defined
