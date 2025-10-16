@@ -1,0 +1,122 @@
+---
+- name: Setup WiFi Connection on Proxmox Host
+  hosts: proxmox_hosts
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
+
+  vars:
+    wlan_interface: "{{ wifi_interface }}"
+    wpa_supplicant_conf: "/etc/wpa_supplicant/wpa_supplicant-{{ wifi_interface }}.conf"
+
+  tasks:
+    - name: Install WiFi tools and utilities
+      ansible.builtin.apt:
+        name:
+          - wireless-tools
+          - wpasupplicant
+          - iw
+        state: present
+        update_cache: true
+
+    - name: Create wpa_supplicant directory
+      ansible.builtin.file:
+        path: /etc/wpa_supplicant
+        state: directory
+        mode: '0755'
+
+    - name: Generate WPA passphrase hash
+      ansible.builtin.command:
+        cmd: "wpa_passphrase '{{ wifi_ssid }}' '{{ wifi_password }}'"
+      register: wpa_passphrase_output
+      changed_when: false
+      no_log: true
+
+    - name: Create wpa_supplicant configuration
+      ansible.builtin.copy:
+        content: |
+          ctrl_interface=/run/wpa_supplicant
+          update_config=1
+          country=UA
+
+          {{ wpa_passphrase_output.stdout }}
+        dest: "{{ wpa_supplicant_conf }}"
+        mode: '0600'
+      no_log: true
+
+    - name: Create systemd service for wpa_supplicant
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=WPA supplicant for {{ wlan_interface }}
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStartPre=/sbin/ip link set {{ wlan_interface }} up
+          ExecStart=/sbin/wpa_supplicant -c {{ wpa_supplicant_conf }} -i {{ wlan_interface }}
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: "/etc/systemd/system/wpa_supplicant@{{ wlan_interface }}.service"
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Bring up WiFi interface
+      ansible.builtin.command:
+        cmd: "ip link set {{ wlan_interface }} up"
+      register: link_up
+      failed_when: false
+      changed_when: link_up.rc == 0
+
+    - name: Enable and start wpa_supplicant service
+      ansible.builtin.systemd:
+        name: "wpa_supplicant@{{ wlan_interface }}"
+        enabled: true
+        state: restarted
+
+    - name: Wait for WiFi connection to establish
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Check WiFi connection status
+      ansible.builtin.command:
+        cmd: "iw dev {{ wlan_interface }} link"
+      register: wifi_status
+      changed_when: false
+
+    - name: Display WiFi status
+      ansible.builtin.debug:
+        msg:
+          - "WiFi setup completed!"
+          - "Interface: {{ wlan_interface }}"
+          - "SSID: {{ wifi_ssid }}"
+          - ""
+          - "Connection status:"
+          - "{{ wifi_status.stdout }}"
+          - ""
+          - "To check available networks:"
+          - "  iw dev {{ wlan_interface }} scan | grep SSID"
+          - ""
+          - "To check connection status:"
+          - "  iw dev {{ wlan_interface }} link"
+          - ""
+          - "Service status:"
+          - "  systemctl status wpa_supplicant@{{ wlan_interface }}"
+
+    - name: Get IP address information
+      ansible.builtin.command:
+        cmd: "ip addr show {{ wlan_interface }}"
+      register: ip_info
+      changed_when: false
+
+    - name: Display IP information
+      ansible.builtin.debug:
+        msg: "{{ ip_info.stdout_lines }}"

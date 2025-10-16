@@ -1,0 +1,126 @@
+---
+- name: Setup NAT Bridge (vmbr1) for Internal Network
+  hosts: proxmox_hosts
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+
+  vars:
+    # Internal NAT network configuration
+    nat_bridge: "{{ proxmox_nat_bridge }}"
+    nat_network: "{{ proxmox_nat_network }}"
+    nat_gateway_ip: "{{ proxmox_nat_gateway }}"
+    external_bridge: "{{ proxmox_network_bridge }}"
+
+    # Optional: Services to expose to external network via DNAT
+    # Format: { port: external_port, internal_ip: ip, internal_port: port }
+    port_forwards:
+      - { port: 80, internal_ip: "10.0.0.10", internal_port: 80 }
+      - { port: 443, internal_ip: "10.0.0.10", internal_port: 443 }
+
+  tasks:
+    - name: Check if NAT bridge already exists in /etc/network/interfaces
+      ansible.builtin.command:
+        cmd: "grep -q 'auto {{ nat_bridge }}' /etc/network/interfaces"
+      register: bridge_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Backup current network configuration
+      ansible.builtin.copy:
+        src: /etc/network/interfaces
+        dest: "/etc/network/interfaces.backup.{{ ansible_date_time.epoch }}"
+        remote_src: true
+        mode: '0644'
+      when: bridge_exists is defined and bridge_exists.rc != 0
+
+    - name: Add NAT bridge configuration to /etc/network/interfaces
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        marker: "# {mark} ANSIBLE MANAGED NAT BRIDGE {{ nat_bridge }}"
+        block: |
+          auto {{ nat_bridge }}
+          iface {{ nat_bridge }} inet static
+              address {{ nat_gateway_ip }}
+              bridge-ports none
+              bridge-stp off
+              bridge-fd 0
+              post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+              post-up   iptables -t nat -A POSTROUTING -s '{{ nat_network }}' -o {{ external_bridge }} -j MASQUERADE
+          {% for forward in port_forwards %}
+              post-up   iptables -t nat -A PREROUTING -i {{ external_bridge }} -p tcp --dport {{ forward.port }} -j DNAT --to {{ forward.internal_ip }}:{{ forward.internal_port }}
+          {% endfor %}
+              post-down iptables -t nat -D POSTROUTING -s '{{ nat_network }}' -o {{ external_bridge }} -j MASQUERADE
+          {% for forward in port_forwards %}
+              post-down iptables -t nat -D PREROUTING -i {{ external_bridge }} -p tcp --dport {{ forward.port }} -j DNAT --to {{ forward.internal_ip }}:{{ forward.internal_port }}
+          {% endfor %}
+      when: bridge_exists is defined and bridge_exists.rc != 0
+
+    - name: Enable IP forwarding permanently
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.conf
+        regexp: '^#?net.ipv4.ip_forward'
+        line: 'net.ipv4.ip_forward=1'
+        state: present
+        create: true
+        mode: '0644'
+
+    - name: Apply sysctl settings
+      ansible.builtin.command:
+        cmd: sysctl -p
+      changed_when: false
+
+    - name: Bring up NAT bridge if not already up
+      ansible.builtin.command:
+        cmd: "ifup {{ nat_bridge }}"
+      register: ifup_result
+      failed_when: false
+      changed_when: ifup_result.rc == 0
+
+    - name: Restart networking service (if bridge was just added)
+      ansible.builtin.service:
+        name: networking
+        state: restarted
+      when: bridge_exists is defined and bridge_exists.rc != 0
+
+    - name: Wait for network to stabilize
+      ansible.builtin.pause:
+        seconds: 5
+      when: bridge_exists is defined and bridge_exists.rc != 0
+
+    - name: Verify NAT bridge is up
+      ansible.builtin.command:
+        cmd: "ip addr show {{ nat_bridge }}"
+      register: bridge_status
+      changed_when: false
+
+    - name: Display NAT bridge information
+      ansible.builtin.debug:
+        msg: |
+          NAT Bridge {{ nat_bridge }} has been configured!
+          Bridge IP: {{ nat_gateway_ip }}
+          Internal network: {{ nat_network }}
+          External bridge: {{ external_bridge }}
+
+          Port forwarding rules:
+          {% for forward in port_forwards %}
+            {{ external_bridge }}:{{ forward.port }} -> {{ forward.internal_ip }}:{{ forward.internal_port }}
+          {% endfor %}
+
+          Bridge status:
+          {{ bridge_status.stdout }}
+
+          Next steps:
+          1. Create LXC containers with --net0 bridge={{ nat_bridge }},ip=10.0.0.X/24,gw={{ nat_gateway_ip }}
+          2. Or use playbooks/lxc/create_nat_container.yaml
+
+    - name: Verify iptables NAT rules
+      ansible.builtin.command:
+        cmd: "iptables -t nat -L -n -v"
+      register: iptables_rules
+      changed_when: false
+
+    - name: Display iptables NAT rules
+      ansible.builtin.debug:
+        msg: "{{ iptables_rules.stdout_lines }}"

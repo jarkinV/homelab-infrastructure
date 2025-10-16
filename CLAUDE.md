@@ -11,6 +11,11 @@ This is a Proxmox automation repository using Ansible to manage VMs, LXC contain
 All playbooks are run from the repository root using `ansible-playbook`:
 
 ```bash
+# Network operations (setup NAT for internal network)
+ansible-playbook playbooks/network/setup_nat_bridge.yaml
+ansible-playbook playbooks/network/check_nat_status.yaml
+ansible-playbook playbooks/network/setup_wifi.yaml  # Setup WiFi connection on Proxmox host
+
 # VM operations
 ansible-playbook playbooks/vm/create_ubuntu_cloud_template.yaml
 ansible-playbook playbooks/vm/clone_and_start_vm.yaml -e "new_vm_id=101 new_vm_name=ubuntu-vm-101"
@@ -18,7 +23,8 @@ ansible-playbook playbooks/vm/setup_docker.yaml
 ansible-playbook playbooks/vm/attach_zfs_datasets.yaml -e "vm_id=100"
 
 # LXC container operations
-ansible-playbook playbooks/lxc/create_container.yaml
+ansible-playbook playbooks/lxc/create_nat_container.yaml  # NAT network (10.0.0.X)
+ansible-playbook playbooks/lxc/create_container.yaml      # Direct network (192.168.X.X)
 ansible-playbook playbooks/lxc/install_docker.yaml
 ansible-playbook playbooks/lxc/update_and_upgrade.yaml
 
@@ -33,6 +39,74 @@ ansible-playbook playbooks/apps/deploy_actual.yaml
 ```
 
 ## Architecture
+
+### Network Architecture
+
+The repository supports two networking modes:
+
+**1. NAT Network (Recommended)**
+
+LXC containers and VMs reside in an internal NAT network (10.0.0.0/24) isolated from the external network. This provides:
+- Stable internal IP addresses independent of external network changes
+- Network isolation and security
+- Easy switching between different routers/networks
+- Centralized access control via port forwarding
+
+Architecture:
+```
+External Network (192.168.X.0/24)
+         ↓
+    [vmbr0] - Proxmox external interface
+         ↓
+    iptables (NAT + DNAT for port forwarding)
+         ↓
+    [vmbr1] - NAT gateway (10.0.0.1/24)
+         ↓
+    LXC/VM internal network (10.0.0.10, 10.0.0.11, ...)
+```
+
+Setup:
+```bash
+# Setup NAT bridge with port forwarding for Traefik (80, 443)
+ansible-playbook playbooks/network/setup_nat_bridge.yaml
+
+# Create LXC in NAT network
+ansible-playbook playbooks/lxc/create_nat_container.yaml \
+  -e "ct_id=100 ct_hostname=traefik ct_ip_address=10.0.0.10/24"
+```
+
+The NAT bridge (vmbr1) is configured in `vars/global.yml`:
+- `proxmox_nat_bridge: vmbr1`
+- `proxmox_nat_network: 10.0.0.0/24`
+- `proxmox_nat_gateway: 10.0.0.1/24`
+
+Port forwarding rules are defined in `playbooks/network/setup_nat_bridge.yaml` using iptables DNAT. By default, ports 80 and 443 are forwarded to 10.0.0.10 (Traefik LXC).
+
+**2. Direct Network (Alternative)**
+
+LXC containers receive IPs directly from the external network (192.168.X.X). This is simpler but less flexible.
+
+```bash
+ansible-playbook playbooks/lxc/create_container.yaml
+```
+
+**3. WiFi Connectivity**
+
+The Proxmox host can connect to WiFi networks using USB WiFi adapters. The playbook automates the setup:
+
+- Installs required packages: `wireless-tools`, `wpasupplicant`, `iw`
+- Configures WPA supplicant with encrypted credentials
+- Creates systemd service for automatic WiFi connection on boot
+- Brings up the WiFi interface
+
+WiFi interface is configured in `vars/global.yml` (`wifi_interface`), and credentials (SSID and password) are stored in `vars/secrets.yml`.
+
+```bash
+# Setup WiFi connection
+ansible-playbook playbooks/network/setup_wifi.yaml
+```
+
+The playbook creates a systemd service (`wpa_supplicant@<interface>`) that automatically connects to the configured network on boot and handles reconnections.
 
 ### Inventory Management
 
@@ -62,11 +136,24 @@ The clone playbook handles inventory updates automatically, adding new VMs to bo
 
 ### LXC Container Workflow
 
-LXC containers are used for privileged workloads like Docker. The `create_container.yaml` playbook creates Debian-based containers with:
+LXC containers are used for privileged workloads like Docker. Two playbooks are available:
+
+**`create_nat_container.yaml`** (Recommended): Creates containers in NAT network (10.0.0.0/24)
+- Internal network isolation
+- Stable IP addresses independent of external network
+- Requires NAT bridge to be configured first
+- Example: `ansible-playbook playbooks/lxc/create_nat_container.yaml -e "ct_id=100 ct_ip_address=10.0.0.10/24"`
+
+**`create_container.yaml`**: Creates containers in external network (192.168.X.X)
+- Direct IP from external DHCP/static assignment
+- Simpler setup but less flexible
+- Example: `ansible-playbook playbooks/lxc/create_container.yaml -e "ct_id=222 ct_ip_address=192.168.8.222/24"`
+
+Both playbooks configure:
 - Nesting enabled (required for Docker)
 - Privileged mode (root in container = root on host)
 - Static IP configuration
-- SSH key injection
+- SSH key injection from `vars/secrets.yml`
 
 ### ZFS Storage Architecture
 

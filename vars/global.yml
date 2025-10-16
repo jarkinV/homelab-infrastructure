@@ -12,6 +12,14 @@ proxmox_snippets_dir: /var/lib/vz/snippets
 # Network Configuration
 proxmox_network_bridge: vmbr0
 
+# WiFi Configuration
+wifi_interface: wlxd84489b70442
+
+# NAT Network Configuration (Internal 10.0.0.0/24)
+proxmox_nat_bridge: vmbr1
+proxmox_nat_network: 10.0.0.0/24
+proxmox_nat_gateway: 10.0.0.1/24
+
 # Default VM Configuration
 default_vm_memory: 2048
 default_vm_cores: 2
