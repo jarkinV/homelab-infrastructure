@@ -1,0 +1,86 @@
+---
+- name: Install Tailscale on LXC Container
+  hosts: lxc_containers
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+    - name: Create directory for Tailscale GPG key
+      ansible.builtin.file:
+        path: /usr/share/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Tailscale GPG key
+      ansible.builtin.get_url:
+        url: https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: '0644'
+
+    - name: Add Tailscale repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian bookworm main"
+        state: present
+        filename: tailscale
+
+    - name: Update apt cache after adding Tailscale repository
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install Tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+
+    - name: Check if Tailscale is already authenticated
+      ansible.builtin.command:
+        cmd: tailscale status
+      register: tailscale_status
+      changed_when: false
+      failed_when: false
+
+    - name: Authenticate Tailscale with auth key
+      ansible.builtin.command:
+        cmd: tailscale up --authkey={{ tailscale_auth_key }} --accept-routes
+      when: tailscale_status.rc != 0
+      no_log: true
+      register: tailscale_auth
+
+    - name: Ensure Tailscale service is started and enabled
+      ansible.builtin.systemd:
+        name: tailscaled
+        state: started
+        enabled: true
+
+    - name: Get Tailscale status
+      ansible.builtin.command:
+        cmd: tailscale status
+      register: tailscale_final_status
+      changed_when: false
+
+    - name: Display Tailscale information
+      ansible.builtin.debug:
+        msg:
+          - "Tailscale has been successfully installed!"
+          - "{{ tailscale_final_status.stdout_lines }}"
+          - ""
+          - "Tailscale service is running and enabled on boot"
+          - ""
+          - "To check IP: tailscale ip -4"
+          - "To check status: tailscale status"

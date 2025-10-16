@@ -13,6 +13,7 @@
       - actual
       - paperless
       - immich
+      - tailscale
 
   tasks:
     - name: Check if ZFS pool exists

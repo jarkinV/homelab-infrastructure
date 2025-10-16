@@ -12,6 +12,7 @@
       - traefik
       - actual
       - paperless
+      - tailscale
 
   tasks:
     - name: Check if container exists
