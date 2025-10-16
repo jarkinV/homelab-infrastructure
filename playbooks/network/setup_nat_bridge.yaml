@@ -55,7 +55,7 @@
           {% for forward in port_forwards %}
               post-down iptables -t nat -D PREROUTING -i {{ external_bridge }} -p tcp --dport {{ forward.port }} -j DNAT --to {{ forward.internal_ip }}:{{ forward.internal_port }}
           {% endfor %}
-      when: bridge_exists is defined and bridge_exists.rc != 0
+      register: bridge_config_updated
 
     - name: Enable IP forwarding permanently
       ansible.builtin.lineinfile:
@@ -71,23 +71,24 @@
         cmd: sysctl -p
       changed_when: false
 
+    - name: Reload bridge configuration if changed
+      ansible.builtin.shell:
+        cmd: "ifdown {{ nat_bridge }} 2>/dev/null || true && ifup {{ nat_bridge }}"
+      when: bridge_config_updated.changed
+      register: bridge_reload
+
     - name: Bring up NAT bridge if not already up
       ansible.builtin.command:
         cmd: "ifup {{ nat_bridge }}"
       register: ifup_result
       failed_when: false
       changed_when: ifup_result.rc == 0
-
-    - name: Restart networking service (if bridge was just added)
-      ansible.builtin.service:
-        name: networking
-        state: restarted
-      when: bridge_exists is defined and bridge_exists.rc != 0
+      when: not bridge_config_updated.changed
 
     - name: Wait for network to stabilize
       ansible.builtin.pause:
         seconds: 5
-      when: bridge_exists is defined and bridge_exists.rc != 0
+      when: bridge_config_updated.changed
 
     - name: Verify NAT bridge is up
       ansible.builtin.command:

@@ -1,0 +1,126 @@
+---
+- name: Check NAT Network Status
+  hosts: proxmox_hosts
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+
+  tasks:
+    - name: Check if NAT bridge exists
+      ansible.builtin.command:
+        cmd: "ip addr show {{ proxmox_nat_bridge }}"
+      register: bridge_status
+      failed_when: false
+      changed_when: false
+
+    - name: Display bridge status
+      ansible.builtin.debug:
+        msg:
+          - "=== NAT Bridge Status ==="
+          - "{{ bridge_status.stdout if bridge_status.rc == 0 else 'NAT bridge ' ~ proxmox_nat_bridge ~ ' NOT FOUND!' }}"
+      when: bridge_status.rc == 0 or bridge_status.rc != 0
+
+    - name: Check IP forwarding
+      ansible.builtin.command:
+        cmd: "cat /proc/sys/net/ipv4/ip_forward"
+      register: ip_forward
+      changed_when: false
+
+    - name: Display IP forwarding status
+      ansible.builtin.debug:
+        msg:
+          - "=== IP Forwarding ==="
+          - "Status: {{ 'ENABLED' if ip_forward.stdout == '1' else 'DISABLED (NAT will not work!)' }}"
+
+    - name: Check NAT iptables rules (POSTROUTING)
+      ansible.builtin.shell:
+        cmd: "iptables -t nat -L POSTROUTING -n -v | grep -E 'MASQUERADE.*{{ proxmox_nat_network.split('/')[0] }}' || echo 'NOT FOUND'"
+      register: nat_masquerade
+      changed_when: false
+
+    - name: Display MASQUERADE rule
+      ansible.builtin.debug:
+        msg:
+          - "=== NAT MASQUERADE Rule ==="
+          - "{{ nat_masquerade.stdout }}"
+
+    - name: Check DNAT iptables rules (PREROUTING)
+      ansible.builtin.command:
+        cmd: "iptables -t nat -L PREROUTING -n -v"
+      register: nat_dnat
+      changed_when: false
+
+    - name: Display DNAT rules
+      ansible.builtin.debug:
+        msg:
+          - "=== DNAT Port Forwarding Rules ==="
+          - "{{ nat_dnat.stdout_lines }}"
+
+    - name: Check routing table
+      ansible.builtin.command:
+        cmd: "ip route show"
+      register: routes
+      changed_when: false
+
+    - name: Display routing table
+      ansible.builtin.debug:
+        msg:
+          - "=== Routing Table ==="
+          - "{{ routes.stdout_lines }}"
+
+    - name: List containers in NAT network
+      ansible.builtin.shell:
+        cmd: "pct list | grep -E '(VMID|running|stopped)' || echo 'No containers found'"
+      register: containers
+      changed_when: false
+
+    - name: Check container network configuration
+      ansible.builtin.shell:
+        cmd: |
+          for ctid in $(pct list | awk 'NR>1 {print $1}'); do
+            echo "=== Container $ctid ==="
+            pct config $ctid | grep -E 'net0|hostname' || echo "No network config"
+          done
+      register: container_networks
+      changed_when: false
+
+    - name: Display container information
+      ansible.builtin.debug:
+        msg:
+          - "=== Containers ==="
+          - "{{ container_networks.stdout_lines }}"
+
+    - name: Check connectivity from Proxmox to NAT network
+      ansible.builtin.command:
+        cmd: "ping -c 2 {{ proxmox_nat_gateway.split('/')[0] }}"
+      register: ping_gateway
+      failed_when: false
+      changed_when: false
+
+    - name: Display gateway connectivity
+      ansible.builtin.debug:
+        msg:
+          - "=== Gateway Connectivity ==="
+          - "{{ 'Gateway ' ~ proxmox_nat_gateway ~ ' is REACHABLE' if ping_gateway.rc == 0 else 'Gateway ' ~ proxmox_nat_gateway ~ ' is NOT REACHABLE' }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - ""
+          - "========================================="
+          - "           NAT NETWORK SUMMARY"
+          - "========================================="
+          - "NAT Bridge: {{ proxmox_nat_bridge }}"
+          - "NAT Gateway: {{ proxmox_nat_gateway }}"
+          - "NAT Network: {{ proxmox_nat_network }}"
+          - "External Bridge: {{ proxmox_network_bridge }}"
+          - ""
+          - "Status:"
+          - "  ✓ Bridge exists: {{ bridge_status.rc == 0 }}"
+          - "  ✓ IP forwarding: {{ ip_forward.stdout == '1' }}"
+          - "  ✓ NAT rule: {{ 'NOT FOUND' not in nat_masquerade.stdout }}"
+          - "  ✓ Gateway ping: {{ ping_gateway.rc == 0 }}"
+          - ""
+          - "{{ 'All checks PASSED! NAT network is operational.' if (bridge_status.rc == 0 and ip_forward.stdout == '1' and 'NOT FOUND' not in nat_masquerade.stdout) else 'Some checks FAILED. Review output above.' }}"
+          - "========================================="
