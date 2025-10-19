@@ -1,0 +1,171 @@
+---
+- name: Setup dnsmasq DNS Server on LXC Container
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install dnsmasq and DNS utilities
+      ansible.builtin.apt:
+        name:
+          - dnsmasq
+          - dnsutils
+        state: present
+
+    - name: Backup original dnsmasq.conf
+      ansible.builtin.copy:
+        src: /etc/dnsmasq.conf
+        dest: /etc/dnsmasq.conf.backup
+        remote_src: true
+        force: false
+
+    - name: Create dnsmasq configuration
+      ansible.builtin.copy:
+        content: |
+          # Listen on all interfaces (0.0.0.0 includes Tailscale, internal network, etc.)
+          listen-address=0.0.0.0
+
+          # Do not read /etc/resolv.conf
+          no-resolv
+
+          # Use Google DNS as upstream
+          server=8.8.8.8
+          server=8.8.4.4
+
+          # Domain configuration
+          domain=varshavskyi.com
+
+          # Wildcard DNS: resolve *.varshavskyi.com to 10.0.0.10 (Traefik)
+          address=/varshavskyi.com/10.0.0.10
+
+          # Cache size
+          cache-size=1000
+
+          # Log queries for debugging (optional, comment out in production)
+          log-queries
+          log-facility=/var/log/dnsmasq.log
+
+          # Do not forward plain names (without domain)
+          domain-needed
+
+          # Do not forward addresses in the non-routed address spaces
+          bogus-priv
+
+          # Bind to interfaces to avoid conflicts
+          bind-interfaces
+        dest: /etc/dnsmasq.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart dnsmasq
+
+    - name: Ensure dnsmasq service is enabled and started
+      ansible.builtin.systemd:
+        name: dnsmasq
+        state: started
+        enabled: true
+
+    - name: Configure container to use its own DNS server
+      ansible.builtin.copy:
+        content: |
+          # Local dnsmasq DNS server
+          nameserver 127.0.0.1
+          # Fallback to Google DNS
+          nameserver 8.8.8.8
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Wait for dnsmasq to be ready
+      ansible.builtin.wait_for:
+        port: 53
+        host: 127.0.0.1
+        timeout: 10
+
+    - name: Get Tailscale IPv4 address
+      ansible.builtin.shell:
+        cmd: ip -4 addr show tailscale0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+      register: tailscale_ip
+      changed_when: false
+      failed_when: false
+
+    - name: Verify dnsmasq is listening on all interfaces
+      ansible.builtin.shell:
+        cmd: ss -tulpn | grep ':53' | grep -E '(0.0.0.0|{{ tailscale_ip.stdout }})'
+      register: listening_check
+      changed_when: false
+      failed_when: listening_check.rc != 0
+
+    - name: Display listening status
+      ansible.builtin.debug:
+        msg:
+          - "✓ dnsmasq is listening on all interfaces including Tailscale"
+          - "Tailscale IP: {{ tailscale_ip.stdout | default('Not detected') }}"
+          - ""
+          - "Listening sockets:"
+          - "{{ listening_check.stdout }}"
+
+    - name: Test local DNS resolution for wildcard domain
+      ansible.builtin.command:
+        cmd: dig +short @127.0.0.1 traefik.varshavskyi.com
+      register: dns_test_local
+      changed_when: false
+      failed_when: dns_test_local.stdout != "10.0.0.10"
+
+    - name: Test DNS resolution without specifying server (uses /etc/resolv.conf)
+      ansible.builtin.command:
+        cmd: dig +short traefik.varshavskyi.com
+      register: dns_test_system
+      changed_when: false
+      failed_when: dns_test_system.stdout != "10.0.0.10"
+
+    - name: Test another subdomain
+      ansible.builtin.command:
+        cmd: dig +short @127.0.0.1 app.varshavskyi.com
+      register: dns_test_subdomain
+      changed_when: false
+      failed_when: dns_test_subdomain.stdout != "10.0.0.10"
+
+    - name: Verify dnsmasq is running
+      ansible.builtin.command:
+        cmd: systemctl status dnsmasq
+      register: dnsmasq_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display dnsmasq status
+      ansible.builtin.debug:
+        msg:
+          - "✓ dnsmasq has been successfully configured!"
+          - ""
+          - "Configuration:"
+          - "  - Wildcard DNS: *.varshavskyi.com -> 10.0.0.10"
+          - "  - Listening on: ALL interfaces (0.0.0.0)"
+          - "  - Upstream DNS: 8.8.8.8, 8.8.4.4"
+          - "  - Container uses its own DNS (127.0.0.1)"
+          - ""
+          - "DNS Resolution Tests:"
+          - "  - traefik.varshavskyi.com: {{ dns_test_local.stdout }}"
+          - "  - app.varshavskyi.com: {{ dns_test_subdomain.stdout }}"
+          - "  - System resolver: {{ dns_test_system.stdout }}"
+          - ""
+          - "Access DNS from:"
+          - "  - Internal network: dig @10.0.0.10 a.varshavskyi.com"
+          - "  - Tailscale network: dig @{{ tailscale_ip.stdout | default('100.114.128.45') }} a.varshavskyi.com"
+          - "  - Local: dig @127.0.0.1 a.varshavskyi.com"
+          - ""
+          - "Query logs available at: /var/log/dnsmasq.log"
+
+  handlers:
+    - name: restart dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        state: restarted
