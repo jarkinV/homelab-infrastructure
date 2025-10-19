@@ -4,7 +4,7 @@
   become: true
 
   vars:
-    ct_id: 222
+    ct_id: 100
     pool_name: "tank"
 
     # Docker apps to attach - each gets a mount point

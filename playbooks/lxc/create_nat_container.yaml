@@ -17,10 +17,10 @@
     ct_template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
     # Resources
-    ct_cores: 2
-    ct_memory: 2048
-    ct_swap: 512
-    ct_disk_size: 8
+    ct_cores: 4
+    ct_memory: 24576
+    ct_swap: 2048
+    ct_disk_size: 50
     ct_disk_storage: "local-lvm"
 
     # Network - NAT configuration
@@ -88,6 +88,15 @@
       ansible.builtin.file:
         path: "/tmp/ct-{{ ct_id }}-ssh-keys.pub"
         state: absent
+
+    - name: Add TUN/TAP device configuration to container
+      ansible.builtin.blockinfile:
+        path: "/etc/pve/lxc/{{ ct_id }}.conf"
+        block: |
+          lxc.cgroup2.devices.allow: c 10:200 rwm
+          lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+        marker: "# {mark} ANSIBLE MANAGED - TUN/TAP device configuration"
+        insertafter: EOF
 
     - name: Start the container
       ansible.builtin.command:

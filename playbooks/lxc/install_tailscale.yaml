@@ -1,6 +1,6 @@
 ---
 - name: Install Tailscale on LXC Container
-  hosts: lxc_containers
+  hosts: lxc_internal_containers
   become: true
 
   vars_files:
@@ -57,9 +57,9 @@
 
     - name: Authenticate Tailscale with auth key
       ansible.builtin.command:
-        cmd: tailscale up --authkey={{ tailscale_auth_key }} --accept-routes
+        cmd: tailscale up --authkey="{{ tailscale_auth_key }}" --advertise-routes=10.0.0.0/24 --ssh
       when: tailscale_status.rc != 0
-      no_log: true
+#      no_log: true
       register: tailscale_auth
 
     - name: Ensure Tailscale service is started and enabled

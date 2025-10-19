@@ -1,6 +1,6 @@
 ---
 - name: Install Docker on LXC Container
-  hosts: lxc_containers
+  hosts: lxc_internal_containers
   become: true
 
   vars_files:

@@ -1,6 +1,6 @@
 ---
 - name: Update and upgrade LXC containers
-  hosts: lxc_containers
+  hosts: lxc_internal_containers
   become: true
 
   tasks:

@@ -1,6 +1,6 @@
 ---
 - name: Deploy Traefik with Docker Compose
-  hosts: lxc_containers
+  hosts: lxc_internal_containers
   become: true
 
   vars_files:
