@@ -40,7 +40,7 @@ ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snaps
 
 # Application deployments
 ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
-ansible-playbook playbooks/apps/deploy_actual.yaml
+ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/deploy_paperless.yaml
 ansible-playbook playbooks/apps/deploy_monitoring.yaml  # Prometheus + Grafana + Loki observability stack
 ```
@@ -345,7 +345,7 @@ The repository includes playbooks for deploying the following applications:
 - ZFS dataset: `docker/traefik`
 - Docker networks: proxy, tunnel, monitoring
 
-**`deploy_actual.yaml`**: Actual Budget - personal finance manager
+**`actual/deploy_actual.yaml`**: Actual Budget - personal finance manager
 - Simple budget tracking and finance management
 - Single container deployment
 - Accessible at budget.domain.com via Traefik

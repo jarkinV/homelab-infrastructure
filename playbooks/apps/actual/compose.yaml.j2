@@ -1,0 +1,25 @@
+networks:
+  proxy:
+    external: true
+
+services:
+  actual_server:
+    image: docker.io/actualbudget/actual-server:25.10.0
+    container_name: actual
+    volumes:
+      - ${DATA_LOCATION}:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.actual.entrypoints=https"
+      - "traefik.http.routers.actual.rule=Host(`budget.${DOMAIN}`)"
+      - "traefik.http.routers.actual.tls=true"
+      - "traefik.http.routers.actual.tls.certresolver=cloudflare"
+      - "traefik.http.routers.actual.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.actual.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.actual.loadbalancer.server.port=5006"
+      - "traefik.docker.network=proxy"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy

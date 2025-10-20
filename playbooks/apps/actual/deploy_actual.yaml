@@ -4,8 +4,8 @@
   become: true
 
   vars_files:
-    - ../../vars/global.yml
-    - ../../vars/secrets.yml
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
 
   vars:
     actual_base_dir: /mnt/actual
@@ -32,44 +32,18 @@
         mode: '0755'
 
     - name: Create .env file for Docker Compose
-      ansible.builtin.copy:
+      ansible.builtin.template:
+        src: .env.j2
         dest: "{{ actual_base_dir }}/.env"
         mode: '0600'
-        content: |
-          DATA_LOCATION={{ actual_base_dir }}/data
-          DOMAIN={{ domain }}
       register: env_file_result
 
     - name: Create compose.yaml for Actual Budget
-      ansible.builtin.copy:
+      ansible.builtin.template:
+        src: compose.yaml.j2
         dest: "{{ actual_base_dir }}/compose.yaml"
         mode: '0644'
-        content: |
-          networks:
-            proxy:
-              external: true
-
-          services:
-            actual_server:
-              image: docker.io/actualbudget/actual-server:25.10.0
-              container_name: actual
-              volumes:
-                - ${DATA_LOCATION}:/data
-              labels:
-                - "traefik.enable=true"
-                - "traefik.http.routers.actual.entrypoints=https"
-                - "traefik.http.routers.actual.rule=Host(`budget.${DOMAIN}`)"
-                - "traefik.http.routers.actual.tls=true"
-                - "traefik.http.routers.actual.tls.certresolver=cloudflare"
-                - "traefik.http.routers.actual.tls.domains[0].main=${DOMAIN}"
-                - "traefik.http.routers.actual.tls.domains[0].sans=*.${DOMAIN}"
-                - "traefik.http.services.actual.loadbalancer.server.port=5006"
-                - "traefik.docker.network=proxy"
-              restart: unless-stopped
-              security_opt:
-                - no-new-privileges:true
-              networks:
-                - proxy
+      register: compose_file_result
 
     - name: Deploy Actual Budget with Docker Compose
       community.docker.docker_compose_v2:
@@ -78,12 +52,12 @@
         pull: "missing"
       register: actual_deploy
 
-    - name: Recreate container if .env file changed
+    - name: Recreate container if configuration changed
       community.docker.docker_compose_v2:
         project_src: "{{ actual_base_dir }}"
         state: present
         recreate: always
-      when: env_file_result.changed
+      when: env_file_result.changed or compose_file_result.changed
       register: actual_recreate
 
     - name: Display deployment status
@@ -91,7 +65,7 @@
         msg:
           - "Actual Budget has been successfully deployed!"
           - "Base directory: {{ actual_base_dir }}"
-          - "Data location: {{ actual_base_dir }}"
+          - "Data location: {{ actual_base_dir }}/data"
           - ""
           - "Access Actual Budget at: https://budget.{{ domain }}"
           - ""
