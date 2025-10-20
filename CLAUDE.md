@@ -39,9 +39,10 @@ ansible-playbook playbooks/zfs/attach_zfs_datasets.yaml -e "ct_id=100"  # Attach
 ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snapshots
 
 # Application deployments
-ansible-playbook playbooks/apps/deploy_traefik.yaml
+ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
 ansible-playbook playbooks/apps/deploy_actual.yaml
 ansible-playbook playbooks/apps/deploy_paperless.yaml
+ansible-playbook playbooks/apps/deploy_monitoring.yaml  # Prometheus + Grafana + Loki observability stack
 ```
 
 ## Architecture
@@ -146,6 +147,14 @@ Required variables in `vars/secrets.yml`:
 - `traefik_dashboard_credentials`: HTTP basic auth for Traefik dashboard
 - `paperless_postgres_password`: PostgreSQL password for Paperless
 - `tailscale_auth_key`: Tailscale authentication key for VPN setup
+- `grafana_admin_password`: Grafana admin password (monitoring stack)
+- `telegram_bot_token`: Telegram bot token for alerts (monitoring stack)
+- `telegram_chat_id`: Telegram chat ID for alerts (monitoring stack)
+- `smtp_host`: SMTP server for email alerts (monitoring stack)
+- `smtp_from`: Email sender address (monitoring stack)
+- `smtp_username`: SMTP username (monitoring stack)
+- `smtp_password`: SMTP password (monitoring stack)
+- `smtp_to`: Email recipient for alerts (monitoring stack)
 - `wifi_ssid`: WiFi network SSID
 - `wifi_password`: WiFi network password
 
@@ -327,13 +336,14 @@ Traefik is the ingress controller, using Cloudflare DNS challenge for wildcard S
 
 The repository includes playbooks for deploying the following applications:
 
-**`deploy_traefik.yaml`**: Traefik reverse proxy and ingress controller
+**`traefik/deploy_traefik.yaml`**: Traefik reverse proxy and ingress controller
 - Automatic SSL/TLS with Let's Encrypt
 - Cloudflare DNS challenge for wildcard certificates (*.domain.com)
 - Dashboard with HTTP basic auth at traefik.domain.com
 - Routes traffic to other Docker containers
+- Prometheus metrics enabled (`:8082` endpoint for monitoring)
 - ZFS dataset: `docker/traefik`
-- Docker network: traefik-network (bridge)
+- Docker networks: proxy, tunnel, monitoring
 
 **`deploy_actual.yaml`**: Actual Budget - personal finance manager
 - Simple budget tracking and finance management
@@ -352,6 +362,23 @@ The repository includes playbooks for deploying the following applications:
   - paperless-db: PostgreSQL database
   - paperless-redis: Redis cache
 - Requires `paperless_postgres_password` in secrets.yml
+
+**`deploy_monitoring.yaml`**: Complete observability stack
+- Comprehensive monitoring and logging solution for all Docker services
+- ZFS dataset: `docker/monitoring`
+- Components:
+  - **Prometheus**: Metrics collection and storage (7-day retention)
+  - **Grafana**: Visualization dashboards at grafana.domain.com
+  - **Alertmanager**: Alert routing to Telegram and Email
+  - **Loki**: Log aggregation (7-day retention)
+  - **Promtail**: Docker log collection
+  - **cAdvisor**: Docker container metrics
+  - **Node Exporter**: Host system metrics
+  - **PostgreSQL Exporter**: Database metrics (Paperless)
+  - **Redis Exporter**: Cache metrics (Paperless)
+- Requires additional secrets: `grafana_admin_password`, `telegram_bot_token`, `telegram_chat_id`, `smtp_*` variables
+- Pre-configured alerts: container down, high CPU/memory, low disk space, database issues
+- See `playbooks/apps/README_monitoring.md` for complete setup guide and dashboard imports
 
 All applications use Traefik for SSL termination and routing, with persistent data stored on ZFS datasets.
 
@@ -420,3 +447,4 @@ Additional documentation is available in the repository:
 **Idempotency**: Playbooks use `changed_when` and `failed_when` to ensure Ansible correctly tracks state changes even when using `command` or `shell` modules.
 
 **Storage references**: Global variables like `proxmox_storage_vm` and `proxmox_network_bridge` centralize infrastructure configuration, making it easy to adapt to different Proxmox setups.
+- ansible playbooks should be idenpotent. If playbook deploy the app in docker and some configuration changed (env file, compose file) then next run playbook should apply these changes and restart the app in docker

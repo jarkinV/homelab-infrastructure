@@ -1,0 +1,664 @@
+---
+- name: Deploy Monitoring Stack (Prometheus, Grafana, Loki) with Docker Compose
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../vars/global.yml
+    - ../../vars/secrets.yml
+
+  vars:
+    monitoring_base_dir: /mnt/monitoring
+    docker_networks:
+      - proxy
+      - monitoring
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create monitoring directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ monitoring_base_dir }}/config"
+        - "{{ monitoring_base_dir }}/config/prometheus"
+        - "{{ monitoring_base_dir }}/config/alertmanager"
+        - "{{ monitoring_base_dir }}/config/loki"
+        - "{{ monitoring_base_dir }}/config/promtail"
+        - "{{ monitoring_base_dir }}/config/grafana"
+        - "{{ monitoring_base_dir }}/data"
+        - "{{ monitoring_base_dir }}/data/prometheus"
+        - "{{ monitoring_base_dir }}/data/grafana"
+        - "{{ monitoring_base_dir }}/data/loki"
+        - "{{ monitoring_base_dir }}/data/alertmanager"
+
+    - name: Create Prometheus configuration
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base_dir }}/config/prometheus/prometheus.yml"
+        mode: '0644'
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+            external_labels:
+              cluster: 'homelab'
+              environment: 'production'
+
+          alerting:
+            alertmanagers:
+              - static_configs:
+                  - targets:
+                      - alertmanager:9093
+
+          rule_files:
+            - '/etc/prometheus/alert-rules.yml'
+
+          scrape_configs:
+            # Prometheus self-monitoring
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+                  labels:
+                    service: 'prometheus'
+
+            # Docker container metrics via cAdvisor
+            - job_name: 'cadvisor'
+              static_configs:
+                - targets: ['cadvisor:8080']
+                  labels:
+                    service: 'cadvisor'
+
+            # Host system metrics via Node Exporter
+            - job_name: 'node-exporter'
+              static_configs:
+                - targets: ['node-exporter:9100']
+                  labels:
+                    service: 'node-exporter'
+                    host: 'traefik-lxc'
+
+            # Traefik reverse proxy metrics
+            - job_name: 'traefik'
+              static_configs:
+                - targets: ['traefik:8082']
+                  labels:
+                    service: 'traefik'
+
+            # PostgreSQL metrics (Paperless database)
+            - job_name: 'postgres-paperless'
+              static_configs:
+                - targets: ['postgres-exporter-paperless:9187']
+                  labels:
+                    service: 'postgres'
+                    app: 'paperless'
+
+            # Redis metrics (Paperless cache)
+            - job_name: 'redis-paperless'
+              static_configs:
+                - targets: ['redis-exporter-paperless:9121']
+                  labels:
+                    service: 'redis'
+                    app: 'paperless'
+
+    - name: Create Prometheus alert rules
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base_dir }}/config/prometheus/alert-rules.yml"
+        mode: '0644'
+        content: |
+          groups:
+            - name: container_alerts
+              interval: 30s
+              rules:
+                - alert: ContainerDown
+                  expr: up{job!="prometheus"} == 0
+                  for: 2m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "Container {{ $labels.job }} is down"
+                    description: "Container {{ $labels.job }} on {{ $labels.instance }} has been down for more than 2 minutes."
+
+                - alert: ContainerHighCPU
+                  expr: rate(container_cpu_usage_seconds_total{container!=""}[5m]) * 100 > 80
+                  for: 5m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "High CPU usage in container {{ $labels.name }}"
+                    description: "Container {{ $labels.name }} is using {{ $value | humanize }}% CPU for more than 5 minutes."
+
+                - alert: ContainerHighMemory
+                  expr: (container_memory_usage_bytes{container!=""} / container_spec_memory_limit_bytes{container!=""}) * 100 > 90
+                  for: 5m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "High memory usage in container {{ $labels.name }}"
+                    description: "Container {{ $labels.name }} is using {{ $value | humanize }}% of available memory for more than 5 minutes."
+
+            - name: host_alerts
+              interval: 30s
+              rules:
+                - alert: HostHighCPU
+                  expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+                  for: 5m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "High CPU usage on host {{ $labels.instance }}"
+                    description: "Host {{ $labels.instance }} CPU usage is {{ $value | humanize }}% for more than 5 minutes."
+
+                - alert: HostHighMemory
+                  expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+                  for: 5m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "High memory usage on host {{ $labels.instance }}"
+                    description: "Host {{ $labels.instance }} memory usage is {{ $value | humanize }}% for more than 5 minutes."
+
+                - alert: HostDiskSpaceLow
+                  expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+                  for: 5m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "Low disk space on host {{ $labels.instance }}"
+                    description: "Host {{ $labels.instance }} has only {{ $value | humanize }}% disk space remaining."
+
+                - alert: HostDiskSpaceWarning
+                  expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 20
+                  for: 10m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "Disk space running low on host {{ $labels.instance }}"
+                    description: "Host {{ $labels.instance }} has {{ $value | humanize }}% disk space remaining."
+
+            - name: database_alerts
+              interval: 30s
+              rules:
+                - alert: PostgreSQLDown
+                  expr: pg_up == 0
+                  for: 2m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "PostgreSQL {{ $labels.app }} is down"
+                    description: "PostgreSQL database for {{ $labels.app }} has been down for more than 2 minutes."
+
+                - alert: RedisDown
+                  expr: redis_up == 0
+                  for: 2m
+                  labels:
+                    severity: critical
+                  annotations:
+                    summary: "Redis {{ $labels.app }} is down"
+                    description: "Redis instance for {{ $labels.app }} has been down for more than 2 minutes."
+
+            - name: traefik_alerts
+              interval: 30s
+              rules:
+                - alert: TraefikHighErrorRate
+                  expr: rate(traefik_entrypoint_requests_total{code=~"5.."}[5m]) > 0.05
+                  for: 5m
+                  labels:
+                    severity: warning
+                  annotations:
+                    summary: "High 5xx error rate on Traefik"
+                    description: "Traefik is returning 5xx errors at {{ $value | humanize }} requests/sec for more than 5 minutes."
+
+    - name: Create Alertmanager configuration
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base_dir }}/config/alertmanager/alertmanager.yml"
+        mode: '0644'
+        content: |
+          global:
+            resolve_timeout: 5m
+
+          route:
+            group_by: ['alertname', 'cluster', 'service']
+            group_wait: 10s
+            group_interval: 10s
+            repeat_interval: 12h
+            receiver: 'default'
+            routes:
+              - match:
+                  severity: critical
+                receiver: 'critical-alerts'
+                continue: true
+              - match:
+                  severity: warning
+                receiver: 'warning-alerts'
+                continue: true
+
+          receivers:
+            - name: 'default'
+              telegram_configs:
+                - bot_token: '${TELEGRAM_BOT_TOKEN}'
+                  chat_id: ${TELEGRAM_CHAT_ID}
+                  parse_mode: 'HTML'
+                  message: |
+                    <b>{{ .Status | toUpper }}</b>
+                    {{ range .Alerts }}
+                    <b>Alert:</b> {{ .Labels.alertname }}
+                    <b>Severity:</b> {{ .Labels.severity }}
+                    <b>Summary:</b> {{ .Annotations.summary }}
+                    <b>Description:</b> {{ .Annotations.description }}
+                    {{ end }}
+
+            - name: 'critical-alerts'
+              telegram_configs:
+                - bot_token: '${TELEGRAM_BOT_TOKEN}'
+                  chat_id: ${TELEGRAM_CHAT_ID}
+                  parse_mode: 'HTML'
+                  message: |
+                    🚨 <b>CRITICAL ALERT</b> 🚨
+                    {{ range .Alerts }}
+                    <b>Alert:</b> {{ .Labels.alertname }}
+                    <b>Summary:</b> {{ .Annotations.summary }}
+                    <b>Description:</b> {{ .Annotations.description }}
+                    {{ end }}
+              email_configs:
+                - to: '${SMTP_TO}'
+                  from: '${SMTP_FROM}'
+                  smarthost: '${SMTP_HOST}'
+                  auth_username: '${SMTP_USERNAME}'
+                  auth_password: '${SMTP_PASSWORD}'
+                  headers:
+                    Subject: '[CRITICAL] Homelab Alert: {{ .GroupLabels.alertname }}'
+                  text: |
+                    Critical Alert Triggered
+
+                    {{ range .Alerts }}
+                    Alert: {{ .Labels.alertname }}
+                    Severity: {{ .Labels.severity }}
+                    Summary: {{ .Annotations.summary }}
+                    Description: {{ .Annotations.description }}
+                    {{ end }}
+
+            - name: 'warning-alerts'
+              telegram_configs:
+                - bot_token: '${TELEGRAM_BOT_TOKEN}'
+                  chat_id: ${TELEGRAM_CHAT_ID}
+                  parse_mode: 'HTML'
+                  message: |
+                    ⚠️ <b>WARNING</b>
+                    {{ range .Alerts }}
+                    <b>Alert:</b> {{ .Labels.alertname }}
+                    <b>Summary:</b> {{ .Annotations.summary }}
+                    {{ end }}
+
+          inhibit_rules:
+            - source_match:
+                severity: 'critical'
+              target_match:
+                severity: 'warning'
+              equal: ['alertname', 'instance']
+
+    - name: Create Loki configuration
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base_dir }}/config/loki/loki-config.yml"
+        mode: '0644'
+        content: |
+          auth_enabled: false
+
+          server:
+            http_listen_port: 3100
+            grpc_listen_port: 9096
+
+          common:
+            instance_addr: 127.0.0.1
+            path_prefix: /loki
+            storage:
+              filesystem:
+                chunks_directory: /loki/chunks
+                rules_directory: /loki/rules
+            replication_factor: 1
+            ring:
+              kvstore:
+                store: inmemory
+
+          query_range:
+            results_cache:
+              cache:
+                embedded_cache:
+                  enabled: true
+                  max_size_mb: 100
+
+          schema_config:
+            configs:
+              - from: 2024-01-01
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index:
+                  prefix: index_
+                  period: 24h
+
+          ruler:
+            alertmanager_url: http://alertmanager:9093
+
+          limits_config:
+            retention_period: 168h  # 7 days
+            max_query_series: 100000
+            max_query_parallelism: 32
+
+          table_manager:
+            retention_deletes_enabled: true
+            retention_period: 168h  # 7 days
+
+          compactor:
+            working_directory: /loki/compactor
+            compaction_interval: 10m
+            retention_enabled: true
+            retention_delete_delay: 2h
+            retention_delete_worker_count: 150
+
+    - name: Create Promtail configuration
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base_dir }}/config/promtail/promtail-config.yml"
+        mode: '0644'
+        content: |
+          server:
+            http_listen_port: 9080
+            grpc_listen_port: 0
+
+          positions:
+            filename: /tmp/positions.yaml
+
+          clients:
+            - url: http://loki:3100/loki/api/v1/push
+
+          scrape_configs:
+            # Collect logs from all Docker containers
+            - job_name: docker
+              docker_sd_configs:
+                - host: unix:///var/run/docker.sock
+                  refresh_interval: 5s
+              relabel_configs:
+                - source_labels: ['__meta_docker_container_name']
+                  target_label: 'container'
+                  regex: '/(.*)'
+                - source_labels: ['__meta_docker_container_log_stream']
+                  target_label: 'stream'
+                - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+                  target_label: 'compose_project'
+                - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+                  target_label: 'compose_service'
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base_dir }}/.env"
+        mode: '0600'
+        content: |
+          DOMAIN={{ domain }}
+          GRAFANA_ADMIN_PASSWORD={{ grafana_admin_password | replace('$', '$$') }}
+          TELEGRAM_BOT_TOKEN={{ telegram_bot_token | replace('$', '$$') }}
+          TELEGRAM_CHAT_ID={{ telegram_chat_id }}
+          SMTP_HOST={{ smtp_host }}
+          SMTP_FROM={{ smtp_from }}
+          SMTP_USERNAME={{ smtp_username }}
+          SMTP_PASSWORD={{ smtp_password | replace('$', '$$') }}
+          SMTP_TO={{ smtp_to }}
+      register: env_file_result
+      no_log: true
+
+    - name: Create compose.yaml for monitoring stack
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base_dir }}/compose.yaml"
+        mode: '0644'
+        content: |
+          networks:
+            proxy:
+              external: true
+            monitoring:
+            paperless-network:
+              external: true
+
+          x-default: &default
+            restart: unless-stopped
+            security_opt:
+              - no-new-privileges:true
+
+          x-monitoring-network: &monitoring-network
+            networks:
+              - monitoring
+
+          services:
+            # Prometheus - Metrics collection and storage
+            prometheus:
+              image: prom/prometheus:v3.2.1
+              container_name: prometheus
+              command:
+                - '--config.file=/etc/prometheus/prometheus.yml'
+                - '--storage.tsdb.path=/prometheus'
+                - '--storage.tsdb.retention.time=7d'
+                - '--web.console.libraries=/etc/prometheus/console_libraries'
+                - '--web.console.templates=/etc/prometheus/consoles'
+                - '--web.enable-lifecycle'
+              volumes:
+                - {{ monitoring_base_dir }}/config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+                - {{ monitoring_base_dir }}/config/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+                - {{ monitoring_base_dir }}/data/prometheus:/prometheus
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.prometheus.entrypoints=https"
+                - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+                - "traefik.http.routers.prometheus.tls=true"
+                - "traefik.http.routers.prometheus.tls.certresolver=cloudflare"
+                - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+                - "traefik.docker.network=proxy"
+              <<: [*default]
+              networks:
+                - monitoring
+                - proxy
+
+            # Grafana - Visualization and dashboards
+            grafana:
+              image: grafana/grafana:11.5.1
+              container_name: grafana
+              environment:
+                - GF_SECURITY_ADMIN_USER=admin
+                - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+                - GF_USERS_ALLOW_SIGN_UP=false
+                - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN}
+                - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+              volumes:
+                - {{ monitoring_base_dir }}/data/grafana:/var/lib/grafana
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.grafana.entrypoints=https"
+                - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+                - "traefik.http.routers.grafana.tls=true"
+                - "traefik.http.routers.grafana.tls.certresolver=cloudflare"
+                - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+                - "traefik.docker.network=proxy"
+              <<: [*default]
+              networks:
+                - monitoring
+                - proxy
+
+            # Alertmanager - Alert routing and notification
+            alertmanager:
+              image: prom/alertmanager:v0.28.1
+              container_name: alertmanager
+              command:
+                - '--config.file=/etc/alertmanager/alertmanager.yml'
+                - '--storage.path=/alertmanager'
+              volumes:
+                - {{ monitoring_base_dir }}/config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+                - {{ monitoring_base_dir }}/data/alertmanager:/alertmanager
+              env_file:
+                - .env
+              <<: [*default, *monitoring-network]
+
+            # Loki - Log aggregation
+            loki:
+              image: grafana/loki:3.3.2
+              container_name: loki
+              command: -config.file=/etc/loki/loki-config.yml
+              volumes:
+                - {{ monitoring_base_dir }}/config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+                - {{ monitoring_base_dir }}/data/loki:/loki
+              <<: [*default, *monitoring-network]
+
+            # Promtail - Log collection from Docker containers
+            promtail:
+              image: grafana/promtail:3.3.2
+              container_name: promtail
+              command: -config.file=/etc/promtail/promtail-config.yml
+              volumes:
+                - {{ monitoring_base_dir }}/config/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+                - /var/lib/docker/containers:/var/lib/docker/containers:ro
+              <<: [*default, *monitoring-network]
+
+            # cAdvisor - Docker container metrics
+            cadvisor:
+              image: gcr.io/cadvisor/cadvisor:v0.51.0
+              container_name: cadvisor
+              privileged: true
+              devices:
+                - /dev/kmsg
+              volumes:
+                - /:/rootfs:ro
+                - /var/run:/var/run:ro
+                - /sys:/sys:ro
+                - /var/lib/docker/:/var/lib/docker:ro
+                - /dev/disk/:/dev/disk:ro
+              command:
+                - '--housekeeping_interval=30s'
+                - '--docker_only=true'
+                - '--disable_metrics=percpu,sched,tcp,udp,disk,diskIO,accelerator,hugetlb,referenced_memory,cpu_topology,resctrl'
+              <<: [*default, *monitoring-network]
+
+            # Node Exporter - Host system metrics
+            node-exporter:
+              image: prom/node-exporter:v1.8.2
+              container_name: node-exporter
+              command:
+                - '--path.rootfs=/host'
+                - '--path.procfs=/host/proc'
+                - '--path.sysfs=/host/sys'
+                - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+              volumes:
+                - /:/host:ro,rslave
+              <<: [*default, *monitoring-network]
+
+            # PostgreSQL Exporter - Paperless database metrics
+            postgres-exporter-paperless:
+              image: prometheuscommunity/postgres-exporter:v0.16.0
+              container_name: postgres-exporter-paperless
+              environment:
+                - DATA_SOURCE_NAME=postgresql://paperless:${PAPERLESS_POSTGRES_PASSWORD}@paperless-postgres:5432/paperless?sslmode=disable
+              env_file:
+                - .env
+              <<: [*default]
+              networks:
+                - monitoring
+                - paperless-network
+
+            # Redis Exporter - Paperless cache metrics
+            redis-exporter-paperless:
+              image: oliver006/redis_exporter:v1.68.0
+              container_name: redis-exporter-paperless
+              environment:
+                - REDIS_ADDR=paperless-redis:6379
+              <<: [*default]
+              networks:
+                - monitoring
+                - paperless-network
+
+    - name: Check if Traefik needs metrics configuration
+      ansible.builtin.debug:
+        msg:
+          - "📝 Traefik Metrics Configuration"
+          - ""
+          - "If Traefik was deployed before monitoring, you need to redeploy it:"
+          - "  ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml"
+          - ""
+          - "This will add Prometheus metrics endpoint and monitoring network."
+          - "The Traefik playbook now includes metrics configuration automatically."
+
+    - name: Set correct permissions for Grafana data directory
+      ansible.builtin.file:
+        path: "{{ monitoring_base_dir }}/data/grafana"
+        state: directory
+        owner: '472'
+        group: '472'
+        mode: '0755'
+        recurse: true
+
+    - name: Deploy monitoring stack with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_base_dir }}"
+        state: present
+        pull: "missing"
+      register: monitoring_deploy
+
+    - name: Recreate containers if .env file changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed
+      register: monitoring_recreate
+
+    - name: Wait for Grafana to be ready
+      ansible.builtin.uri:
+        url: "http://localhost:3000/api/health"
+        status_code: 200
+      register: grafana_health
+      until: grafana_health.status == 200
+      retries: 30
+      delay: 2
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "  Monitoring Stack Deployed Successfully!"
+          - "============================================"
+          - ""
+          - "📊 Access Points:"
+          - "  • Grafana:     https://grafana.{{ domain }}"
+          - "  • Prometheus:  https://prometheus.{{ domain }}"
+          - ""
+          - "🔐 Credentials:"
+          - "  • Grafana:     admin / (check your secrets.yml)"
+          - ""
+          - "📁 Base Directory: {{ monitoring_base_dir }}"
+          - ""
+          - "🎯 Next Steps:"
+          - "  1. Login to Grafana at https://grafana.{{ domain }}"
+          - "  2. Add data sources:"
+          - "     - Prometheus: http://prometheus:9090"
+          - "     - Loki: http://loki:3100"
+          - "  3. Import dashboards (recommended IDs):"
+          - "     - 193: Docker containers (cAdvisor)"
+          - "     - 1860: Node Exporter (host metrics)"
+          - "     - 15489: Traefik metrics"
+          - "     - 9628: PostgreSQL database"
+          - "     - 11835: Redis"
+          - "     - 13639: Loki logs"
+          - "  4. If Traefik was deployed before monitoring:"
+          - "     ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml"
+          - ""
+          - "🔔 Alerts:"
+          - "  • Telegram notifications configured"
+          - "  • Email alerts for critical events"
+          - "  • Check Alertmanager: http://{{ ansible_default_ipv4.address }}:9093"
+          - ""
+          - "Container status: {{ 'Deployed' if monitoring_deploy.changed else 'Already running' }}"

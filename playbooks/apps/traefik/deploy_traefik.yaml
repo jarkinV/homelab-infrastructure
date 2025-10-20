@@ -1,0 +1,99 @@
+---
+- name: Deploy Traefik with Docker Compose
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+
+  vars:
+    traefik_base_dir: /mnt/traefik
+    traefik_config_dir: /mnt/traefik/config
+    traefik_log_dir: /mnt/traefik/logs
+    docker_networks:
+      - proxy
+      - tunnel
+      - monitoring
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create Traefik configuration directory
+      ansible.builtin.file:
+        path: "{{ traefik_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create Traefik log directory
+      ansible.builtin.file:
+        path: "{{ traefik_log_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create traefik.yaml configuration file
+      ansible.builtin.template:
+        src: traefik.yaml.j2
+        dest: "{{ traefik_config_dir }}/traefik.yaml"
+        mode: '0644'
+      register: traefik_config_result
+
+    - name: Create acme.json file with proper permissions
+      ansible.builtin.file:
+        path: "{{ traefik_config_dir }}/acme.json"
+        state: touch
+        mode: '0600'
+        modification_time: preserve
+        access_time: preserve
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ traefik_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+      no_log: true
+
+    - name: Create compose.yaml for Traefik
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ traefik_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Deploy Traefik with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ traefik_base_dir }}"
+        state: present
+        pull: "missing"
+      register: traefik_deploy
+
+    - name: Recreate container if configuration changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ traefik_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed or compose_file_result.changed or traefik_config_result.changed
+      register: traefik_recreate
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Traefik has been successfully deployed!"
+          - "Base directory: {{ traefik_base_dir }}"
+          - "Configuration directory: {{ traefik_config_dir }}"
+          - "Log directory: {{ traefik_log_dir }}"
+          - ""
+          - "Access Traefik dashboard at: https://traefik.{{ domain }}"
+          - ""
+          - "Container status: {{ 'Running' if traefik_deploy.changed else 'Already running' }}"
