@@ -1,0 +1,60 @@
+networks:
+  proxy:
+    external: true
+  paperless-network:
+
+x-default: &default
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+x-networks: &networks
+  networks:
+    - paperless-network
+
+services:
+  broker:
+    image: docker.io/library/redis:8
+    container_name: paperless-redis
+    volumes:
+      - {{ paperless_base_dir }}/config/redis:/data
+    <<: [*default, *networks]
+
+  db:
+    image: docker.io/library/postgres:17
+    container_name: paperless-postgres
+    volumes:
+      - {{ paperless_base_dir }}/config/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    <<: [*default, *networks]
+
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.18
+    container_name: paperless-web
+    depends_on:
+      - db
+      - broker
+    volumes:
+      - {{ paperless_base_dir }}/config/web/data:/usr/src/paperless/data
+      - {{ paperless_base_dir }}/media:/usr/src/paperless/media
+      - {{ paperless_base_dir }}/export:/usr/src/paperless/export
+      - {{ paperless_base_dir }}/consume:/usr/src/paperless/consume
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.paperless.entrypoints=https"
+      - "traefik.http.routers.paperless.rule=Host(`paperless.${DOMAIN}`)"
+      - "traefik.http.routers.paperless.tls=true"
+      - "traefik.http.routers.paperless.tls.certresolver=cloudflare"
+      - "traefik.http.routers.paperless.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.paperless.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.paperless.loadbalancer.server.port=8000"
+      - "traefik.docker.network=proxy"
+    env_file:
+      - .env
+    <<: [*default]
+    networks:
+      - paperless-network
+      - proxy

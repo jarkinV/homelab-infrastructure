@@ -41,7 +41,7 @@ ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snaps
 # Application deployments
 ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
 ansible-playbook playbooks/apps/actual/deploy_actual.yaml
-ansible-playbook playbooks/apps/deploy_paperless.yaml
+ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
 ansible-playbook playbooks/apps/deploy_monitoring.yaml  # Prometheus + Grafana + Loki observability stack
 ```
 
@@ -352,7 +352,7 @@ The repository includes playbooks for deploying the following applications:
 - ZFS dataset: `docker/actual`
 - Data persistence in /data volume
 
-**`deploy_paperless.yaml`**: Paperless-ngx - document management system
+**`paperless/deploy_paperless.yaml`**: Paperless-ngx - document management system
 - Multi-container stack (app + PostgreSQL + Redis)
 - OCR support for scanned documents (English + Polish)
 - Web interface at paperless.domain.com

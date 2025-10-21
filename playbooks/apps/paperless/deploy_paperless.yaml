@@ -1,0 +1,85 @@
+---
+- name: Deploy Paperless-ngx with Docker Compose
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+
+  vars:
+    paperless_base_dir: /mnt/paperless
+    docker_networks:
+      - proxy
+      - paperless-network
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create Paperless directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ paperless_base_dir }}/config"
+        - "{{ paperless_base_dir }}/config/redis"
+        - "{{ paperless_base_dir }}/config/postgres"
+        - "{{ paperless_base_dir }}/config/web"
+        - "{{ paperless_base_dir }}/config/web/data"
+        - "{{ paperless_base_dir }}/media"
+        - "{{ paperless_base_dir }}/export"
+        - "{{ paperless_base_dir }}/consume"
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ paperless_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+      no_log: true
+
+    - name: Create compose.yaml for Paperless-ngx
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ paperless_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Deploy Paperless-ngx with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ paperless_base_dir }}"
+        state: present
+        pull: "missing"
+      register: paperless_deploy
+
+    - name: Recreate containers if configuration changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ paperless_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed or compose_file_result.changed
+      register: paperless_recreate
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Paperless-ngx has been successfully deployed!"
+          - "Base directory: {{ paperless_base_dir }}"
+          - "Config location: {{ paperless_base_dir }}/config"
+          - "Export directory: {{ paperless_base_dir }}/export"
+          - "Consume directory: {{ paperless_base_dir }}/consume"
+          - ""
+          - "Access Paperless-ngx at: https://paperless.{{ domain }}"
+          - ""
+          - "Container status: {{ 'Deployed' if paperless_deploy.changed else 'Already running' }}"
