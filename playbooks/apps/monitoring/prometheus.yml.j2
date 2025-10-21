@@ -1,0 +1,61 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'homelab'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - '/etc/prometheus/alert-rules.yml'
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Docker container metrics via cAdvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'cadvisor'
+
+  # Host system metrics via Node Exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node-exporter'
+          host: 'traefik-lxc'
+
+  # Traefik reverse proxy metrics
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8082']
+        labels:
+          service: 'traefik'
+
+  # PostgreSQL metrics (Paperless database)
+  - job_name: 'postgres-paperless'
+    static_configs:
+      - targets: ['postgres-exporter-paperless:9187']
+        labels:
+          service: 'postgres'
+          app: 'paperless'
+
+  # Redis metrics (Paperless cache)
+  - job_name: 'redis-paperless'
+    static_configs:
+      - targets: ['redis-exporter-paperless:9121']
+        labels:
+          service: 'redis'
+          app: 'paperless'

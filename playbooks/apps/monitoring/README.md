@@ -1,6 +1,6 @@
-# Monitoring Stack Setup Guide
+# Monitoring Stack - Prometheus, Grafana, Loki, Alertmanager
 
-This guide covers the deployment and configuration of a complete observability stack with Prometheus, Grafana, Loki, and Alertmanager for monitoring Docker services.
+Complete observability stack for monitoring Docker services, host systems, and applications with metrics collection, visualization, log aggregation, and alerting.
 
 ## Overview
 
@@ -89,6 +89,21 @@ The monitoring stack provides:
    - Paperless cache metrics
    - Memory usage, hit rate, keys
 
+## Directory Structure
+
+```
+playbooks/apps/monitoring/
+├── deploy_monitoring.yaml    # Main deployment playbook
+├── README.md                  # This file
+├── .env.j2                    # Environment variables template
+├── compose.yaml.j2            # Docker Compose configuration
+├── prometheus.yml.j2          # Prometheus scrape config
+├── alert-rules.yml.j2         # Prometheus alert definitions
+├── alertmanager.yml.j2        # Alertmanager notification routing
+├── loki-config.yml.j2         # Loki log aggregation config
+└── promtail-config.yml.j2     # Promtail log collection config
+```
+
 ## Prerequisites
 
 ### 1. Required Secrets
@@ -140,7 +155,7 @@ For other providers, adjust `smtp_host` accordingly:
 
 ### 4. ZFS Dataset
 
-The monitoring stack requires a ZFS dataset. This was automatically added to the configuration files, but you need to create it:
+The monitoring stack requires a ZFS dataset. This should be automatically created:
 
 ```bash
 # Create ZFS dataset
@@ -150,19 +165,19 @@ ansible-playbook playbooks/zfs/configure_zfs_storage.yaml
 ansible-playbook playbooks/zfs/attach_zfs_datasets.yaml -e "ct_id=100"
 ```
 
-This creates `/mnt/monitoring` inside the Traefik LXC container.
+This creates `/mnt/zfs/docker/monitoring` inside the Traefik LXC container.
 
 ## Deployment
 
 ### 1. Deploy the Stack
 
 ```bash
-ansible-playbook playbooks/apps/deploy_monitoring.yaml
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml
 ```
 
 This will:
 - Create necessary directories
-- Generate configuration files for all services
+- Generate configuration files for all services from templates
 - Deploy all containers via Docker Compose
 - Set up Traefik routes for Grafana and Prometheus
 
@@ -180,6 +195,65 @@ This will automatically add:
 - Required command-line flags
 
 **Note:** The Traefik playbook (`traefik/deploy_traefik.yaml`) now includes Prometheus metrics configuration by default. New Traefik deployments will have metrics enabled automatically.
+
+## Configuration Files
+
+### Environment Variables (.env.j2)
+
+Contains all sensitive configuration:
+- Domain name
+- Grafana admin password
+- Telegram bot token and chat ID
+- SMTP credentials for email alerts
+- Paperless PostgreSQL password for database exporter
+
+### Docker Compose (compose.yaml.j2)
+
+Defines all 9 services with:
+- YAML anchors for DRY configuration
+- Network connections (monitoring, proxy, paperless-network)
+- Volume mounts for persistent data
+- Traefik labels for SSL termination
+
+### Prometheus Configuration (prometheus.yml.j2)
+
+Scrape targets:
+- `prometheus`: Self-monitoring
+- `cadvisor`: Docker container metrics
+- `node-exporter`: Host system metrics
+- `postgres-exporter-paperless`: Paperless database
+- `redis-exporter-paperless`: Paperless cache
+- `traefik`: Reverse proxy metrics
+
+### Alert Rules (alert-rules.yml.j2)
+
+Pre-configured alerts for:
+- Container status (down, high CPU, high memory)
+- Host resources (CPU, memory, disk space)
+- Database availability (PostgreSQL, Redis)
+- Traefik error rates
+
+### Alertmanager Config (alertmanager.yml.j2)
+
+Notification routing:
+- Critical alerts → Telegram + Email
+- Warning alerts → Telegram only
+- Grouped by: alertname, cluster, service
+- Repeat interval: 12 hours
+
+### Loki Configuration (loki-config.yml.j2)
+
+Log aggregation settings:
+- 7-day retention period
+- Filesystem storage backend
+- Compaction and cleanup settings
+
+### Promtail Configuration (promtail-config.yml.j2)
+
+Log collection from Docker:
+- Automatic container discovery via Docker socket
+- Container metadata labeling
+- Log shipping to Loki
 
 ## Grafana Configuration
 
@@ -290,8 +364,7 @@ docker start actual
 
 **Test email notifications:**
 ```bash
-# Trigger critical alert by filling disk space
-# Or manually test via Alertmanager API
+# Manually test via Alertmanager API
 curl -X POST http://10.0.0.10:9093/api/v1/alerts -d '[{
   "labels": {"alertname": "TestAlert", "severity": "critical"},
   "annotations": {"summary": "Test alert"}
@@ -300,16 +373,28 @@ curl -X POST http://10.0.0.10:9093/api/v1/alerts -d '[{
 
 ### Customizing Alerts
 
-Alert rules are in `/mnt/monitoring/config/prometheus/alert-rules.yml`. After editing:
+Alert rules are defined in `alert-rules.yml.j2`. After modifying the template:
 
 ```bash
-# Reload Prometheus configuration
-docker exec prometheus killall -HUP prometheus
+# Redeploy the monitoring stack
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml
 
-# Or restart the container
-cd /mnt/monitoring
-docker compose restart prometheus
+# Or manually reload Prometheus configuration
+docker exec prometheus killall -HUP prometheus
 ```
+
+## Idempotency
+
+The playbook is fully idempotent and tracks changes to all configuration files:
+- `.env` (environment variables)
+- `compose.yaml` (Docker Compose)
+- `prometheus.yml` (Prometheus config)
+- `alert-rules.yml` (alert definitions)
+- `alertmanager.yml` (notification routing)
+- `loki-config.yml` (log aggregation)
+- `promtail-config.yml` (log collection)
+
+When any configuration file changes, the playbook automatically recreates all affected containers.
 
 ## Maintenance
 
@@ -317,7 +402,7 @@ docker compose restart prometheus
 
 ```bash
 # All services
-cd /mnt/monitoring
+cd /mnt/zfs/docker/monitoring
 docker compose logs -f
 
 # Specific service
@@ -342,22 +427,40 @@ curl http://localhost:3100/ready
 ### Backup
 
 Important directories to backup:
-- `/mnt/monitoring/data/grafana` - Dashboards and settings
-- `/mnt/monitoring/data/prometheus` - Metrics data (optional, retained for 7 days)
-- `/mnt/monitoring/config/` - All configuration files
+- `/mnt/zfs/docker/monitoring/data/grafana` - Dashboards and settings
+- `/mnt/zfs/docker/monitoring/data/prometheus` - Metrics data (optional, 7-day retention)
+- `/mnt/zfs/docker/monitoring/config/` - All configuration files
 
-Since this is on a ZFS dataset, you can use Sanoid for automated snapshots.
+Since this is on a ZFS dataset, use Sanoid for automated snapshots:
+
+```bash
+# Install Sanoid (if not already installed)
+ansible-playbook playbooks/zfs/install_sanoid.yaml
+
+# Configure in /etc/sanoid/sanoid.conf:
+[docker/monitoring]
+use_template = production
+recursive = yes
+```
+
+Recovery procedures are documented in `docs/recovery-guide.md`.
 
 ### Update Services
 
 ```bash
-cd /mnt/monitoring
+cd /mnt/zfs/docker/monitoring
 
 # Pull latest images
 docker compose pull
 
 # Recreate containers with new images
 docker compose up -d
+```
+
+Or redeploy via Ansible:
+
+```bash
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml
 ```
 
 ## Troubleshooting
@@ -398,7 +501,7 @@ docker compose logs alertmanager | grep -i error
 **Verify secrets in .env:**
 ```bash
 # Inside LXC container
-cat /mnt/monitoring/.env
+cat /mnt/zfs/docker/monitoring/.env
 ```
 
 **Test Telegram bot:**
@@ -411,24 +514,29 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 ### High Resource Usage
 
 **Reduce Prometheus retention:**
-Edit `/mnt/monitoring/compose.yaml`:
+Edit `compose.yaml.j2`:
 ```yaml
 command:
-  - '--storage.tsdb.retention.time=3d'  # Change from 7d to 3d
+  - '--storage.tsdb.retention.time=3d'  # Change from 7d
 ```
 
 **Reduce Loki retention:**
-Edit `/mnt/monitoring/config/loki/loki-config.yml`:
+Edit `loki-config.yml.j2`:
 ```yaml
 limits_config:
   retention_period: 72h  # Change from 168h
 ```
 
 **Disable unused exporters:**
-Comment out services in compose.yaml:
+Comment out services in `compose.yaml.j2`:
 ```yaml
 # postgres-exporter-paperless:
 #   image: ...
+```
+
+Then redeploy:
+```bash
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml
 ```
 
 ## Monitoring Additional Applications
@@ -437,7 +545,7 @@ To add monitoring for new applications (e.g., Immich):
 
 ### 1. Add Scrape Config
 
-Edit `/mnt/monitoring/config/prometheus/prometheus.yml`:
+Edit `prometheus.yml.j2`:
 ```yaml
 scrape_configs:
   - job_name: 'postgres-immich'
@@ -447,23 +555,32 @@ scrape_configs:
 
 ### 2. Add Exporter to Compose
 
-Edit `/mnt/monitoring/compose.yaml`:
+Edit `compose.yaml.j2`:
 ```yaml
 postgres-exporter-immich:
   image: prometheuscommunity/postgres-exporter:v0.16.0
   container_name: postgres-exporter-immich
   environment:
     - DATA_SOURCE_NAME=postgresql://user:pass@immich-postgres:5432/immich?sslmode=disable
+  <<: [*default]
   networks:
     - monitoring
     - immich-network
 ```
 
-### 3. Restart Stack
+### 3. Add Network Definition
+
+If using an external network:
+```yaml
+networks:
+  immich-network:
+    external: true
+```
+
+### 4. Redeploy Stack
 
 ```bash
-cd /mnt/monitoring
-docker compose up -d
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml
 ```
 
 ## Security Considerations
@@ -473,6 +590,7 @@ docker compose up -d
 3. **Traefik Integration**: Prometheus and Grafana use SSL via Traefik
 4. **Secret Management**: Sensitive data is in `.env` with `0600` permissions
 5. **Email Credentials**: Use app passwords, not your main account password
+6. **Telegram Bot**: Keep bot token secret, restrict bot to specific chat IDs
 
 ## Performance Impact
 
@@ -487,6 +605,16 @@ docker compose up -d
 
 **Total overhead:** ~600MB RAM for full stack
 
+## Integration with Other Services
+
+This monitoring stack is designed to integrate with:
+- **Traefik**: Reverse proxy metrics and SSL termination
+- **Paperless**: PostgreSQL and Redis metrics
+- **Actual Budget**: Container metrics via cAdvisor
+- Any Docker service: Automatic log collection via Promtail
+
+All services in the `monitoring` network are automatically discovered and monitored.
+
 ## References
 
 - [Prometheus Documentation](https://prometheus.io/docs/)
@@ -494,3 +622,5 @@ docker compose up -d
 - [Loki Documentation](https://grafana.com/docs/loki/latest/)
 - [Alertmanager Configuration](https://prometheus.io/docs/alerting/latest/configuration/)
 - [Grafana Dashboards Library](https://grafana.com/grafana/dashboards/)
+- [cAdvisor Documentation](https://github.com/google/cadvisor)
+- [Node Exporter Documentation](https://github.com/prometheus/node_exporter)

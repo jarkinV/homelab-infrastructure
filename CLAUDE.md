@@ -42,7 +42,7 @@ ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snaps
 ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
 ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
-ansible-playbook playbooks/apps/deploy_monitoring.yaml  # Prometheus + Grafana + Loki observability stack
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml  # Prometheus + Grafana + Loki observability stack
 ```
 
 ## Architecture
@@ -363,11 +363,12 @@ The repository includes playbooks for deploying the following applications:
   - paperless-redis: Redis cache
 - Requires `paperless_postgres_password` in secrets.yml
 
-**`deploy_monitoring.yaml`**: Complete observability stack
+**`monitoring/deploy_monitoring.yaml`**: Complete observability stack
 - Comprehensive monitoring and logging solution for all Docker services
 - ZFS dataset: `docker/monitoring`
+- Configuration templates: `.env.j2`, `compose.yaml.j2`, `prometheus.yml.j2`, `alert-rules.yml.j2`, `alertmanager.yml.j2`, `loki-config.yml.j2`, `promtail-config.yml.j2`
 - Components:
-  - **Prometheus**: Metrics collection and storage (7-day retention)
+  - **Prometheus**: Metrics collection and storage (7-day retention) at prometheus.domain.com
   - **Grafana**: Visualization dashboards at grafana.domain.com
   - **Alertmanager**: Alert routing to Telegram and Email
   - **Loki**: Log aggregation (7-day retention)
@@ -378,7 +379,8 @@ The repository includes playbooks for deploying the following applications:
   - **Redis Exporter**: Cache metrics (Paperless)
 - Requires additional secrets: `grafana_admin_password`, `telegram_bot_token`, `telegram_chat_id`, `smtp_*` variables
 - Pre-configured alerts: container down, high CPU/memory, low disk space, database issues
-- See `playbooks/apps/README_monitoring.md` for complete setup guide and dashboard imports
+- Full idempotency: tracks all 7 configuration files
+- See `playbooks/apps/monitoring/README.md` for complete setup guide, Grafana dashboard imports, and troubleshooting
 
 All applications use Traefik for SSL termination and routing, with persistent data stored on ZFS datasets.
 

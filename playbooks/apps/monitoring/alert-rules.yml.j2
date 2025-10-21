@@ -1,0 +1,102 @@
+groups:
+  - name: container_alerts
+    interval: 30s
+    rules:
+      - alert: ContainerDown
+        expr: up{job!="prometheus"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{{{ $labels.job }}}} is down"
+          description: "Container {{{{ $labels.job }}}} on {{{{ $labels.instance }}}} has been down for more than 2 minutes."
+
+      - alert: ContainerHighCPU
+        expr: rate(container_cpu_usage_seconds_total{container!=""}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage in container {{{{ $labels.name }}}}"
+          description: "Container {{{{ $labels.name }}}} is using {{{{ $value | humanize }}}}% CPU for more than 5 minutes."
+
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes{container!=""} / container_spec_memory_limit_bytes{container!=""}) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage in container {{{{ $labels.name }}}}"
+          description: "Container {{{{ $labels.name }}}} is using {{{{ $value | humanize }}}}% of available memory for more than 5 minutes."
+
+  - name: host_alerts
+    interval: 30s
+    rules:
+      - alert: HostHighCPU
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on host {{{{ $labels.instance }}}}"
+          description: "Host {{{{ $labels.instance }}}} CPU usage is {{{{ $value | humanize }}}}% for more than 5 minutes."
+
+      - alert: HostHighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High memory usage on host {{{{ $labels.instance }}}}"
+          description: "Host {{{{ $labels.instance }}}} memory usage is {{{{ $value | humanize }}}}% for more than 5 minutes."
+
+      - alert: HostDiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on host {{{{ $labels.instance }}}}"
+          description: "Host {{{{ $labels.instance }}}} has only {{{{ $value | humanize }}}}% disk space remaining."
+
+      - alert: HostDiskSpaceWarning
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space running low on host {{{{ $labels.instance }}}}"
+          description: "Host {{{{ $labels.instance }}}} has {{{{ $value | humanize }}}}% disk space remaining."
+
+  - name: database_alerts
+    interval: 30s
+    rules:
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL {{{{ $labels.app }}}} is down"
+          description: "PostgreSQL database for {{{{ $labels.app }}}} has been down for more than 2 minutes."
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis {{{{ $labels.app }}}} is down"
+          description: "Redis instance for {{{{ $labels.app }}}} has been down for more than 2 minutes."
+
+  - name: traefik_alerts
+    interval: 30s
+    rules:
+      - alert: TraefikHighErrorRate
+        expr: rate(traefik_entrypoint_requests_total{code=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate on Traefik"
+          description: "Traefik is returning 5xx errors at {{{{ $value | humanize }}}} requests/sec for more than 5 minutes."

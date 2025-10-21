@@ -1,0 +1,123 @@
+---
+- name: Deploy Monitoring Stack (Prometheus, Grafana, Loki, Alertmanager)
+  hosts: lxc_internal_containers
+  become: yes
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+  vars:
+    monitoring_base_dir: "/mnt/zfs/docker/monitoring"
+
+  tasks:
+    - name: Create monitoring directory structure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ monitoring_base_dir }}"
+        - "{{ monitoring_base_dir }}/config"
+        - "{{ monitoring_base_dir }}/config/prometheus"
+        - "{{ monitoring_base_dir }}/config/alertmanager"
+        - "{{ monitoring_base_dir }}/config/loki"
+        - "{{ monitoring_base_dir }}/config/promtail"
+        - "{{ monitoring_base_dir }}/data"
+        - "{{ monitoring_base_dir }}/data/prometheus"
+        - "{{ monitoring_base_dir }}/data/grafana"
+        - "{{ monitoring_base_dir }}/data/alertmanager"
+        - "{{ monitoring_base_dir }}/data/loki"
+
+    - name: Template environment file
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ monitoring_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+
+    - name: Template docker-compose file
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ monitoring_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Template Prometheus configuration
+      ansible.builtin.template:
+        src: prometheus.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/prometheus/prometheus.yml"
+        mode: '0644'
+      register: prometheus_config_result
+
+    - name: Template Prometheus alert rules
+      ansible.builtin.template:
+        src: alert-rules.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/prometheus/alert-rules.yml"
+        mode: '0644'
+      register: alert_rules_result
+
+    - name: Template Alertmanager configuration
+      ansible.builtin.template:
+        src: alertmanager.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/alertmanager/alertmanager.yml"
+        mode: '0644'
+      register: alertmanager_config_result
+
+    - name: Template Loki configuration
+      ansible.builtin.template:
+        src: loki-config.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/loki/loki-config.yml"
+        mode: '0644'
+      register: loki_config_result
+
+    - name: Template Promtail configuration
+      ansible.builtin.template:
+        src: promtail-config.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/promtail/promtail-config.yml"
+        mode: '0644'
+      register: promtail_config_result
+
+    - name: Deploy monitoring stack with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_base_dir }}"
+        state: present
+        recreate: >-
+          {{
+            'always' if (
+              env_file_result.changed or
+              compose_file_result.changed or
+              prometheus_config_result.changed or
+              alert_rules_result.changed or
+              alertmanager_config_result.changed or
+              loki_config_result.changed or
+              promtail_config_result.changed
+            ) else 'auto'
+          }}
+      register: compose_result
+
+    - name: Display deployment result
+      ansible.builtin.debug:
+        msg: |
+          Monitoring stack deployed successfully!
+
+          Services deployed:
+          - Prometheus: https://prometheus.{{ domain }}
+          - Grafana: https://grafana.{{ domain }} (admin/{{ grafana_admin_password }})
+          - Loki: Internal (port 3100)
+          - Alertmanager: Internal (port 9093)
+          - Promtail: Log collector
+          - cAdvisor: Container metrics (internal)
+          - Node Exporter: Host metrics (internal)
+          - PostgreSQL Exporter: Paperless DB metrics (internal)
+          - Redis Exporter: Paperless cache metrics (internal)
+
+          Next steps:
+          1. Access Grafana and configure dashboards
+          2. Add Prometheus as data source in Grafana (http://prometheus:9090)
+          3. Add Loki as data source in Grafana (http://loki:3100)
+          4. Import recommended dashboards (see README.md)
+          5. Test alerts by triggering test conditions
+
+          Alerts configured for:
+          - Telegram: {{ telegram_chat_id }}
+          - Email: {{ smtp_to }}
+      when: compose_result.changed
