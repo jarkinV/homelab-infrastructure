@@ -6,7 +6,7 @@
     - ../../../vars/global.yml
     - ../../../vars/secrets.yml
   vars:
-    monitoring_base_dir: "/mnt/zfs/docker/monitoring"
+    monitoring_base_dir: "/mnt/monitoring"
 
   tasks:
     - name: Check if basic monitoring is deployed

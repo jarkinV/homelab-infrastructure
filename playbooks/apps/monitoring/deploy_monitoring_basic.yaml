@@ -6,7 +6,7 @@
     - ../../../vars/global.yml
     - ../../../vars/secrets.yml
   vars:
-    monitoring_base_dir: "/mnt/zfs/docker/monitoring"
+    monitoring_base_dir: "/mnt/monitoring"
 
   tasks:
     - name: Create monitoring directory structure
@@ -20,7 +20,14 @@
         - "{{ monitoring_base_dir }}/config/prometheus"
         - "{{ monitoring_base_dir }}/data"
         - "{{ monitoring_base_dir }}/data/prometheus"
-        - "{{ monitoring_base_dir }}/data/grafana"
+
+    - name: Create Grafana data directory with proper ownership
+      ansible.builtin.file:
+        path: "{{ monitoring_base_dir }}/data/grafana"
+        state: directory
+        mode: '0755'
+        owner: '472'
+        group: '472'
 
     - name: Template basic environment file
       ansible.builtin.template:
