@@ -63,7 +63,7 @@
       ansible.builtin.blockinfile:
         path: "{{ monitoring_base_dir }}/compose.yaml"
         marker: "  # {mark} ANSIBLE MANAGED BLOCK - LOGGING"
-        insertafter: "^  node-exporter:"
+        insertbefore: "^$"
         block: |2
 
             # Loki - Log aggregation
