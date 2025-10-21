@@ -19,7 +19,14 @@
         - "{{ monitoring_base_dir }}/config"
         - "{{ monitoring_base_dir }}/config/prometheus"
         - "{{ monitoring_base_dir }}/data"
-        - "{{ monitoring_base_dir }}/data/prometheus"
+
+    - name: Create Prometheus data directory with proper ownership
+      ansible.builtin.file:
+        path: "{{ monitoring_base_dir }}/data/prometheus"
+        state: directory
+        mode: '0755'
+        owner: '65534'
+        group: '65534'
 
     - name: Create Grafana data directory with proper ownership
       ansible.builtin.file:

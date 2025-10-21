@@ -27,7 +27,14 @@
       loop:
         - "{{ monitoring_base_dir }}/config/loki"
         - "{{ monitoring_base_dir }}/config/promtail"
-        - "{{ monitoring_base_dir }}/data/loki"
+
+    - name: Create Loki data directory with proper ownership
+      ansible.builtin.file:
+        path: "{{ monitoring_base_dir }}/data/loki"
+        state: directory
+        mode: '0755'
+        owner: '10001'
+        group: '10001'
 
     - name: Template Loki configuration
       ansible.builtin.template:
