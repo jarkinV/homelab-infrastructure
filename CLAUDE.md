@@ -42,7 +42,16 @@ ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snaps
 ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
 ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
-ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml  # Prometheus + Grafana + Loki observability stack
+
+# Monitoring stack - two deployment options:
+# Option 1: Complete deployment (all features at once)
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml
+
+# Option 2: Modular deployment (start with basics, add features incrementally)
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_basic.yaml      # Phase 1: Prometheus + Grafana + cAdvisor + Node Exporter
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_logging.yaml    # Phase 2: Add Loki + Promtail (optional)
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_alerts.yaml     # Phase 3: Add Alertmanager (optional)
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_exporters.yaml  # Phase 4: Add PostgreSQL + Redis exporters (optional)
 ```
 
 ## Architecture
@@ -363,24 +372,30 @@ The repository includes playbooks for deploying the following applications:
   - paperless-redis: Redis cache
 - Requires `paperless_postgres_password` in secrets.yml
 
-**`monitoring/deploy_monitoring.yaml`**: Complete observability stack
+**`monitoring/deploy_monitoring*.yaml`**: Observability stack with modular deployment
 - Comprehensive monitoring and logging solution for all Docker services
 - ZFS dataset: `docker/monitoring`
-- Configuration templates: `.env.j2`, `compose.yaml.j2`, `prometheus.yml.j2`, `alert-rules.yml.j2`, `alertmanager.yml.j2`, `loki-config.yml.j2`, `promtail-config.yml.j2`
+- **Two deployment options**:
+  - **Complete** (`deploy_monitoring.yaml`): All features at once (requires all secrets)
+  - **Modular** (4 playbooks): Start with basics, add features incrementally
+    - Phase 1: `deploy_monitoring_basic.yaml` - Prometheus + Grafana + cAdvisor + Node Exporter (only needs `grafana_admin_password`)
+    - Phase 2: `deploy_monitoring_logging.yaml` - Add Loki + Promtail for log aggregation
+    - Phase 3: `deploy_monitoring_alerts.yaml` - Add Alertmanager with Telegram + Email alerts (needs `telegram_*`, `smtp_*`)
+    - Phase 4: `deploy_monitoring_exporters.yaml` - Add PostgreSQL + Redis exporters (needs `paperless_postgres_password`)
+- Configuration templates: `.env*.j2`, `compose*.yaml.j2`, `prometheus*.yml.j2`, `alert-rules.yml.j2`, `alertmanager.yml.j2`, `loki-config.yml.j2`, `promtail-config.yml.j2`
 - Components:
   - **Prometheus**: Metrics collection and storage (7-day retention) at prometheus.domain.com
   - **Grafana**: Visualization dashboards at grafana.domain.com
-  - **Alertmanager**: Alert routing to Telegram and Email
-  - **Loki**: Log aggregation (7-day retention)
-  - **Promtail**: Docker log collection
+  - **Alertmanager**: Alert routing to Telegram and Email (Phase 3)
+  - **Loki**: Log aggregation (7-day retention, Phase 2)
+  - **Promtail**: Docker log collection (Phase 2)
   - **cAdvisor**: Docker container metrics
   - **Node Exporter**: Host system metrics
-  - **PostgreSQL Exporter**: Database metrics (Paperless)
-  - **Redis Exporter**: Cache metrics (Paperless)
-- Requires additional secrets: `grafana_admin_password`, `telegram_bot_token`, `telegram_chat_id`, `smtp_*` variables
-- Pre-configured alerts: container down, high CPU/memory, low disk space, database issues
-- Full idempotency: tracks all 7 configuration files
-- See `playbooks/apps/monitoring/README.md` for complete setup guide, Grafana dashboard imports, and troubleshooting
+  - **PostgreSQL Exporter**: Database metrics for Paperless (Phase 4)
+  - **Redis Exporter**: Cache metrics for Paperless (Phase 4)
+- Full idempotency: all playbooks check existing configuration and only restart when needed
+- See `playbooks/apps/monitoring/README.md` for complete deployment guide
+- See `playbooks/apps/monitoring/README-modular.md` for detailed modular deployment guide
 
 All applications use Traefik for SSL termination and routing, with persistent data stored on ZFS datasets.
 

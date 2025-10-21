@@ -1,0 +1,83 @@
+---
+- name: Deploy Basic Monitoring Stack (Prometheus + Grafana)
+  hosts: lxc_internal_containers
+  become: yes
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+  vars:
+    monitoring_base_dir: "/mnt/zfs/docker/monitoring"
+
+  tasks:
+    - name: Create monitoring directory structure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ monitoring_base_dir }}"
+        - "{{ monitoring_base_dir }}/config"
+        - "{{ monitoring_base_dir }}/config/prometheus"
+        - "{{ monitoring_base_dir }}/data"
+        - "{{ monitoring_base_dir }}/data/prometheus"
+        - "{{ monitoring_base_dir }}/data/grafana"
+
+    - name: Template basic environment file
+      ansible.builtin.template:
+        src: .env-basic.j2
+        dest: "{{ monitoring_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+
+    - name: Template basic docker-compose file
+      ansible.builtin.template:
+        src: compose-basic.yaml.j2
+        dest: "{{ monitoring_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Template basic Prometheus configuration
+      ansible.builtin.template:
+        src: prometheus-basic.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/prometheus/prometheus.yml"
+        mode: '0644'
+      register: prometheus_config_result
+
+    - name: Deploy basic monitoring stack with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_base_dir }}"
+        state: present
+        recreate: >-
+          {{
+            'always' if (
+              env_file_result.changed or
+              compose_file_result.changed or
+              prometheus_config_result.changed
+            ) else 'auto'
+          }}
+      register: compose_result
+
+    - name: Display deployment result
+      ansible.builtin.debug:
+        msg: |
+          Basic monitoring stack deployed successfully!
+
+          Services deployed:
+          - Prometheus: https://prometheus.{{ domain }} (metrics collection)
+          - Grafana: https://grafana.{{ domain }} (admin/{{ grafana_admin_password }})
+          - cAdvisor: Internal - Docker container metrics
+          - Node Exporter: Internal - Host system metrics
+
+          Next steps:
+          1. Access Grafana at https://grafana.{{ domain }}
+          2. Add Prometheus as data source (http://prometheus:9090)
+          3. Import dashboards:
+             - Docker Monitoring: Dashboard ID 193
+             - Host System: Dashboard ID 1860
+             - Traefik: Dashboard ID 15489
+
+          To add more features:
+          - Logging: ansible-playbook playbooks/apps/monitoring/deploy_monitoring_logging.yaml
+          - Alerts: ansible-playbook playbooks/apps/monitoring/deploy_monitoring_alerts.yaml
+          - App Exporters: ansible-playbook playbooks/apps/monitoring/deploy_monitoring_exporters.yaml
+      when: compose_result.changed

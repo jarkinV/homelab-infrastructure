@@ -1,0 +1,119 @@
+---
+- name: Add Logging to Monitoring Stack (Loki + Promtail)
+  hosts: lxc_internal_containers
+  become: yes
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+  vars:
+    monitoring_base_dir: "/mnt/zfs/docker/monitoring"
+
+  tasks:
+    - name: Check if basic monitoring is deployed
+      ansible.builtin.stat:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+      register: compose_check
+
+    - name: Fail if basic monitoring not deployed
+      ansible.builtin.fail:
+        msg: "Basic monitoring stack not found. Please run deploy_monitoring_basic.yaml first."
+      when: not compose_check.stat.exists
+
+    - name: Create logging directory structure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ monitoring_base_dir }}/config/loki"
+        - "{{ monitoring_base_dir }}/config/promtail"
+        - "{{ monitoring_base_dir }}/data/loki"
+
+    - name: Template Loki configuration
+      ansible.builtin.template:
+        src: loki-config.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/loki/loki-config.yml"
+        mode: '0644'
+      register: loki_config_result
+
+    - name: Template Promtail configuration
+      ansible.builtin.template:
+        src: promtail-config.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/promtail/promtail-config.yml"
+        mode: '0644'
+      register: promtail_config_result
+
+    - name: Read current compose file
+      ansible.builtin.slurp:
+        src: "{{ monitoring_base_dir }}/compose.yaml"
+      register: current_compose
+
+    - name: Check if Loki already in compose
+      ansible.builtin.set_fact:
+        loki_exists: "{{ 'loki:' in (current_compose.content | b64decode) }}"
+
+    - name: Add Loki and Promtail services to compose file
+      ansible.builtin.blockinfile:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+        marker: "  # {mark} ANSIBLE MANAGED BLOCK - LOGGING"
+        insertafter: "^  node-exporter:"
+        block: |2
+
+            # Loki - Log aggregation
+            loki:
+              image: grafana/loki:3.3.2
+              container_name: loki
+              command: -config.file=/etc/loki/loki-config.yml
+              volumes:
+                - {{ monitoring_base_dir }}/config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+                - {{ monitoring_base_dir }}/data/loki:/loki
+              <<: [*default, *monitoring-network]
+
+            # Promtail - Log collection from Docker containers
+            promtail:
+              image: grafana/promtail:3.3.2
+              container_name: promtail
+              command: -config.file=/etc/promtail/promtail-config.yml
+              volumes:
+                - {{ monitoring_base_dir }}/config/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+                - /var/lib/docker/containers:/var/lib/docker/containers:ro
+              <<: [*default, *monitoring-network]
+      when: not loki_exists
+      register: compose_updated
+
+    - name: Restart monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_base_dir }}"
+        state: present
+        recreate: >-
+          {{
+            'always' if (
+              loki_config_result.changed or
+              promtail_config_result.changed or
+              compose_updated.changed
+            ) else 'auto'
+          }}
+      register: compose_result
+
+    - name: Display result
+      ansible.builtin.debug:
+        msg: |
+          Logging added to monitoring stack!
+
+          Services added:
+          - Loki: http://loki:3100 (internal, 7-day log retention)
+          - Promtail: Collecting logs from all Docker containers
+
+          Next steps:
+          1. Access Grafana at https://grafana.{{ domain }}
+          2. Add Loki as data source:
+             - Go to Connections → Data Sources → Add data source
+             - Select Loki
+             - URL: http://loki:3100
+             - Click Save & Test
+          3. Import log dashboard:
+             - Dashboard ID: 13639 (Logs / App)
+
+          To add alerts:
+          - ansible-playbook playbooks/apps/monitoring/deploy_monitoring_alerts.yaml

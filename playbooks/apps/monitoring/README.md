@@ -10,6 +10,44 @@ The monitoring stack provides:
 - **Log Aggregation**: Loki collects and indexes logs from all Docker containers
 - **Alerting**: Alertmanager routes alerts to Telegram and Email
 
+## Deployment Options
+
+### Option 1: Modular Deployment (Recommended for Beginners)
+
+Start with basic monitoring and add features incrementally:
+
+```bash
+# Phase 1: Basic monitoring (Prometheus + Grafana + cAdvisor + Node Exporter)
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_basic.yaml
+
+# Phase 2: Add logging (Loki + Promtail) - Optional
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_logging.yaml
+
+# Phase 3: Add alerting (Alertmanager + alert rules) - Optional
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_alerts.yaml
+
+# Phase 4: Add app exporters (PostgreSQL + Redis) - Optional
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring_exporters.yaml
+```
+
+**Advantages**: Start simple, lower resource usage, easier troubleshooting, only configure needed secrets.
+
+See [README-modular.md](README-modular.md) for detailed modular deployment guide.
+
+### Option 2: Complete Deployment (All-in-One)
+
+Deploy the full stack with all features at once:
+
+```bash
+ansible-playbook playbooks/apps/monitoring/deploy_monitoring.yaml
+```
+
+**Advantages**: Full observability immediately, single deployment, comprehensive monitoring from day one.
+
+**Requirements**: All secrets configured (Grafana, Telegram, SMTP, database passwords).
+
+The rest of this README covers the complete deployment. For modular deployment details, see [README-modular.md](README-modular.md).
+
 ## Architecture
 
 ```

@@ -1,0 +1,156 @@
+---
+- name: Add Alerting to Monitoring Stack (Alertmanager + Alert Rules)
+  hosts: lxc_internal_containers
+  become: yes
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+  vars:
+    monitoring_base_dir: "/mnt/zfs/docker/monitoring"
+
+  tasks:
+    - name: Check if basic monitoring is deployed
+      ansible.builtin.stat:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+      register: compose_check
+
+    - name: Fail if basic monitoring not deployed
+      ansible.builtin.fail:
+        msg: "Basic monitoring stack not found. Please run deploy_monitoring_basic.yaml first."
+      when: not compose_check.stat.exists
+
+    - name: Check required secrets
+      ansible.builtin.assert:
+        that:
+          - telegram_bot_token is defined
+          - telegram_chat_id is defined
+          - smtp_host is defined
+          - smtp_from is defined
+          - smtp_username is defined
+          - smtp_password is defined
+          - smtp_to is defined
+        fail_msg: "Missing required secrets for alerting. Please add telegram_bot_token, telegram_chat_id, and smtp_* variables to vars/secrets.yml"
+
+    - name: Create alerting directory structure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ monitoring_base_dir }}/config/alertmanager"
+        - "{{ monitoring_base_dir }}/data/alertmanager"
+
+    - name: Update environment file with alert secrets
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ monitoring_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+
+    - name: Template Prometheus alert rules
+      ansible.builtin.template:
+        src: alert-rules.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/prometheus/alert-rules.yml"
+        mode: '0644'
+      register: alert_rules_result
+
+    - name: Template Alertmanager configuration
+      ansible.builtin.template:
+        src: alertmanager.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/alertmanager/alertmanager.yml"
+        mode: '0644'
+      register: alertmanager_config_result
+
+    - name: Update Prometheus configuration with alert rules
+      ansible.builtin.template:
+        src: prometheus.yml.j2
+        dest: "{{ monitoring_base_dir }}/config/prometheus/prometheus.yml"
+        mode: '0644'
+      register: prometheus_config_result
+
+    - name: Read current compose file
+      ansible.builtin.slurp:
+        src: "{{ monitoring_base_dir }}/compose.yaml"
+      register: current_compose
+
+    - name: Check if Alertmanager already in compose
+      ansible.builtin.set_fact:
+        alertmanager_exists: "{{ 'alertmanager:' in (current_compose.content | b64decode) }}"
+
+    - name: Add Alertmanager service to compose file
+      ansible.builtin.blockinfile:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+        marker: "  # {mark} ANSIBLE MANAGED BLOCK - ALERTING"
+        insertafter: "^  grafana:"
+        block: |2
+
+            # Alertmanager - Alert routing and notification
+            alertmanager:
+              image: prom/alertmanager:v0.28.1
+              container_name: alertmanager
+              command:
+                - '--config.file=/etc/alertmanager/alertmanager.yml'
+                - '--storage.path=/alertmanager'
+              volumes:
+                - {{ monitoring_base_dir }}/config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+                - {{ monitoring_base_dir }}/data/alertmanager:/alertmanager
+              env_file:
+                - .env
+              <<: [*default, *monitoring-network]
+      when: not alertmanager_exists
+      register: compose_updated
+
+    - name: Update Prometheus volumes to include alert rules
+      ansible.builtin.replace:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+        regexp: '(- {{ monitoring_base_dir }}/config/prometheus/prometheus\.yml:/etc/prometheus/prometheus\.yml:ro)'
+        replace: |2
+              - {{ monitoring_base_dir }}/config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+              - {{ monitoring_base_dir }}/config/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      register: prometheus_volumes_updated
+
+    - name: Restart monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_base_dir }}"
+        state: present
+        recreate: >-
+          {{
+            'always' if (
+              env_file_result.changed or
+              alert_rules_result.changed or
+              alertmanager_config_result.changed or
+              prometheus_config_result.changed or
+              compose_updated.changed or
+              prometheus_volumes_updated.changed
+            ) else 'auto'
+          }}
+      register: compose_result
+
+    - name: Display result
+      ansible.builtin.debug:
+        msg: |
+          Alerting added to monitoring stack!
+
+          Services added:
+          - Alertmanager: Internal (port 9093)
+          - Alert rules configured for:
+            * Container status (down, high CPU, high memory)
+            * Host resources (CPU, memory, disk space)
+            * Database availability (if exporters deployed)
+            * Traefik error rates
+
+          Alert routing:
+          - Critical alerts → Telegram ({{ telegram_chat_id }}) + Email ({{ smtp_to }})
+          - Warning alerts → Telegram only
+          - Repeat interval: 12 hours
+
+          Test alerts:
+          1. Stop a container:
+             docker stop actual
+          2. Wait 2 minutes for ContainerDown alert
+          3. Check Telegram and email for notifications
+          4. Restart container:
+             docker start actual
+
+          To add application exporters:
+          - ansible-playbook playbooks/apps/monitoring/deploy_monitoring_exporters.yaml

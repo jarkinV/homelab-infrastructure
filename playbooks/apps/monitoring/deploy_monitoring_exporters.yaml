@@ -1,0 +1,158 @@
+---
+- name: Add Application Exporters to Monitoring Stack (PostgreSQL + Redis)
+  hosts: lxc_internal_containers
+  become: yes
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+  vars:
+    monitoring_base_dir: "/mnt/zfs/docker/monitoring"
+
+  tasks:
+    - name: Check if basic monitoring is deployed
+      ansible.builtin.stat:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+      register: compose_check
+
+    - name: Fail if basic monitoring not deployed
+      ansible.builtin.fail:
+        msg: "Basic monitoring stack not found. Please run deploy_monitoring_basic.yaml first."
+      when: not compose_check.stat.exists
+
+    - name: Check required secrets
+      ansible.builtin.assert:
+        that:
+          - paperless_postgres_password is defined
+        fail_msg: "Missing paperless_postgres_password in vars/secrets.yml"
+
+    - name: Update environment file with database password
+      ansible.builtin.template:
+        src: .env-exporters.j2
+        dest: "{{ monitoring_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+
+    - name: Read current compose file
+      ansible.builtin.slurp:
+        src: "{{ monitoring_base_dir }}/compose.yaml"
+      register: current_compose
+
+    - name: Check if exporters already in compose
+      ansible.builtin.set_fact:
+        exporters_exist: "{{ 'postgres-exporter-paperless:' in (current_compose.content | b64decode) }}"
+
+    - name: Check if paperless-network exists in compose
+      ansible.builtin.set_fact:
+        paperless_network_exists: "{{ 'paperless-network:' in (current_compose.content | b64decode) }}"
+
+    - name: Add paperless-network to networks section
+      ansible.builtin.blockinfile:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+        marker: "  # {mark} ANSIBLE MANAGED BLOCK - PAPERLESS NETWORK"
+        insertafter: "^networks:"
+        block: |2
+            paperless-network:
+              external: true
+      when: not paperless_network_exists
+      register: network_added
+
+    - name: Add exporter services to compose file
+      ansible.builtin.blockinfile:
+        path: "{{ monitoring_base_dir }}/compose.yaml"
+        marker: "  # {mark} ANSIBLE MANAGED BLOCK - EXPORTERS"
+        insertbefore: "^$"
+        block: |2
+
+            # PostgreSQL Exporter - Paperless database metrics
+            postgres-exporter-paperless:
+              image: prometheuscommunity/postgres-exporter:v0.16.0
+              container_name: postgres-exporter-paperless
+              environment:
+                - DATA_SOURCE_NAME=postgresql://paperless:${PAPERLESS_POSTGRES_PASSWORD}@paperless-postgres:5432/paperless?sslmode=disable
+              env_file:
+                - .env
+              <<: [*default]
+              networks:
+                - monitoring
+                - paperless-network
+
+            # Redis Exporter - Paperless cache metrics
+            redis-exporter-paperless:
+              image: oliver006/redis_exporter:v1.68.0
+              container_name: redis-exporter-paperless
+              environment:
+                - REDIS_ADDR=paperless-redis:6379
+              <<: [*default]
+              networks:
+                - monitoring
+                - paperless-network
+      when: not exporters_exist
+      register: compose_updated
+
+    - name: Read current Prometheus config
+      ansible.builtin.slurp:
+        src: "{{ monitoring_base_dir }}/config/prometheus/prometheus.yml"
+      register: current_prometheus_config
+
+    - name: Check if exporter scrape configs exist
+      ansible.builtin.set_fact:
+        postgres_scrape_exists: "{{ 'postgres-exporter-paperless' in (current_prometheus_config.content | b64decode) }}"
+
+    - name: Add exporter scrape configs to Prometheus
+      ansible.builtin.blockinfile:
+        path: "{{ monitoring_base_dir }}/config/prometheus/prometheus.yml"
+        marker: "  # {mark} ANSIBLE MANAGED BLOCK - EXPORTERS"
+        insertafter: "^scrape_configs:"
+        block: |2
+
+            # PostgreSQL metrics from Paperless database
+            - job_name: 'postgres-exporter-paperless'
+              static_configs:
+                - targets: ['postgres-exporter-paperless:9187']
+
+            # Redis metrics from Paperless cache
+            - job_name: 'redis-exporter-paperless'
+              static_configs:
+                - targets: ['redis-exporter-paperless:9121']
+      when: not postgres_scrape_exists
+      register: prometheus_updated
+
+    - name: Restart monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_base_dir }}"
+        state: present
+        recreate: >-
+          {{
+            'always' if (
+              env_file_result.changed or
+              compose_updated.changed or
+              prometheus_updated.changed or
+              network_added.changed
+            ) else 'auto'
+          }}
+      register: compose_result
+
+    - name: Display result
+      ansible.builtin.debug:
+        msg: |
+          Application exporters added to monitoring stack!
+
+          Services added:
+          - PostgreSQL Exporter: Monitoring Paperless database
+          - Redis Exporter: Monitoring Paperless cache
+
+          Metrics now available:
+          - PostgreSQL: Connection pool, query performance, locks
+          - Redis: Memory usage, command rate, hit ratio
+
+          Next steps:
+          1. Access Grafana at https://grafana.{{ domain }}
+          2. Import database dashboards:
+             - PostgreSQL: Dashboard ID 9628
+             - Redis: Dashboard ID 11835
+          3. Monitor application health in real-time
+
+          To monitor additional applications:
+          - Edit compose.yaml to add more exporters
+          - Update Prometheus scrape configs
+          - See README.md for examples
