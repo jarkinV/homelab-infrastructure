@@ -37,38 +37,6 @@
         - "{{ immich_base_dir }}/ml_cache"
         - "{{ immich_base_dir }}/redis_data"
 
-    - name: Set ownership for upload directory (UID 3001)
-      ansible.builtin.file:
-        path: "{{ immich_base_dir }}/upload"
-        owner: "3001"
-        group: "3001"
-        recurse: true
-        state: directory
-
-    - name: Set ownership for postgres directory (UID 999)
-      ansible.builtin.file:
-        path: "{{ immich_base_dir }}/postgres"
-        owner: "999"
-        group: "999"
-        recurse: true
-        state: directory
-
-    - name: Set ownership for ML cache directory (UID 3001)
-      ansible.builtin.file:
-        path: "{{ immich_base_dir }}/ml_cache"
-        owner: "3001"
-        group: "3001"
-        recurse: true
-        state: directory
-
-    - name: Set ownership for Redis data directory (UID 999)
-      ansible.builtin.file:
-        path: "{{ immich_base_dir }}/redis_data"
-        owner: "999"
-        group: "999"
-        recurse: true
-        state: directory
-
     - name: Create .env file for Docker Compose
       ansible.builtin.template:
         src: .env.j2

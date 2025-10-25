@@ -15,7 +15,7 @@ x-networks: &networks
 services:
   immich-server:
     container_name: immich_server
-    image: ghcr.io/immich-app/immich-server:v1.137.3
+    image: ghcr.io/immich-app/immich-server:release
     volumes:
       - ${UPLOAD_LOCATION}:/usr/src/app/upload
       - /etc/localtime:/etc/localtime:ro
@@ -43,7 +43,7 @@ services:
 
   immich-machine-learning:
     container_name: immich_machine_learning
-    image: ghcr.io/immich-app/immich-machine-learning:v1.138.1
+    image: ghcr.io/immich-app/immich-machine-learning:release
     volumes:
       - {{ immich_base_dir }}/ml_cache:/cache
     env_file:
