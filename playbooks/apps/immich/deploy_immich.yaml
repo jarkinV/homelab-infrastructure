@@ -1,0 +1,112 @@
+---
+- name: Deploy Immich with Docker Compose
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+
+  vars:
+    immich_base_dir: /mnt/immich
+    docker_networks:
+      - proxy
+      - immich-network
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create Immich directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ immich_base_dir }}/upload"
+        - "{{ immich_base_dir }}/postgres"
+        - "{{ immich_base_dir }}/ml_cache"
+        - "{{ immich_base_dir }}/redis_data"
+
+    - name: Set ownership for upload directory (UID 3001)
+      ansible.builtin.file:
+        path: "{{ immich_base_dir }}/upload"
+        owner: "3001"
+        group: "3001"
+        recurse: true
+        state: directory
+
+    - name: Set ownership for postgres directory (UID 999)
+      ansible.builtin.file:
+        path: "{{ immich_base_dir }}/postgres"
+        owner: "999"
+        group: "999"
+        recurse: true
+        state: directory
+
+    - name: Set ownership for ML cache directory (UID 3001)
+      ansible.builtin.file:
+        path: "{{ immich_base_dir }}/ml_cache"
+        owner: "3001"
+        group: "3001"
+        recurse: true
+        state: directory
+
+    - name: Set ownership for Redis data directory (UID 999)
+      ansible.builtin.file:
+        path: "{{ immich_base_dir }}/redis_data"
+        owner: "999"
+        group: "999"
+        recurse: true
+        state: directory
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ immich_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+      no_log: true
+
+    - name: Create compose.yaml for Immich
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ immich_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Deploy Immich with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ immich_base_dir }}"
+        state: present
+        pull: "missing"
+      register: immich_deploy
+
+    - name: Recreate containers if configuration changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ immich_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed or compose_file_result.changed
+      register: immich_recreate
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Immich has been successfully deployed!"
+          - "Base directory: {{ immich_base_dir }}"
+          - "Upload directory: {{ immich_base_dir }}/upload"
+          - "Database directory: {{ immich_base_dir }}/postgres"
+          - ""
+          - "Access Immich at: https://photos.{{ domain }}"
+          - ""
+          - "Container status: {{ 'Running' if immich_deploy.changed else 'Already running' }}"

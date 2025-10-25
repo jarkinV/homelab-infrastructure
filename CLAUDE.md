@@ -42,6 +42,7 @@ ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snaps
 ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
 ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
+ansible-playbook playbooks/apps/immich/deploy_immich.yaml
 
 # Monitoring stack - two deployment options:
 # Option 1: Complete deployment (all features at once)
@@ -155,6 +156,7 @@ Required variables in `vars/secrets.yml`:
 - `domain`: Primary domain name for services
 - `traefik_dashboard_credentials`: HTTP basic auth for Traefik dashboard
 - `paperless_postgres_password`: PostgreSQL password for Paperless
+- `immich_postgres_password`: PostgreSQL password for Immich
 - `tailscale_auth_key`: Tailscale authentication key for VPN setup
 - `grafana_admin_password`: Grafana admin password (monitoring stack)
 - `telegram_bot_token`: Telegram bot token for alerts (monitoring stack)
@@ -371,6 +373,20 @@ The repository includes playbooks for deploying the following applications:
   - paperless-db: PostgreSQL database
   - paperless-redis: Redis cache
 - Requires `paperless_postgres_password` in secrets.yml
+
+**`immich/deploy_immich.yaml`**: Immich - self-hosted photo and video management
+- Multi-container stack (app + PostgreSQL + Redis + Machine Learning)
+- Smart photo and video management with face recognition and object detection
+- Mobile apps available for iOS and Android
+- Web interface at photos.domain.com
+- ZFS dataset: `docker/immich`
+- Components:
+  - immich-server: Main application (API + web interface)
+  - immich-machine-learning: ML service for face recognition and object detection
+  - immich-postgres: PostgreSQL database with pgvecto.rs extension
+  - immich-redis: Redis cache
+- Automatic directory ownership configuration (UIDs: 3001 for app/ML, 999 for database/Redis)
+- Requires `immich_postgres_password` in secrets.yml
 
 **`monitoring/deploy_monitoring*.yaml`**: Observability stack with modular deployment
 - Comprehensive monitoring and logging solution for all Docker services

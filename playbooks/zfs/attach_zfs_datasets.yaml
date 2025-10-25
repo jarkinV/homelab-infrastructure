@@ -12,8 +12,8 @@
       - traefik
       - actual
       - paperless
-      - tailscale
       - monitoring
+      - immich
 
   tasks:
     - name: Check if container exists

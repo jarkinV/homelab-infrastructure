@@ -203,7 +203,7 @@ ansible-playbook playbooks/zfs/configure_zfs_storage.yaml
 ansible-playbook playbooks/zfs/attach_zfs_datasets.yaml -e "ct_id=100"
 ```
 
-This creates `/mnt/zfs/docker/monitoring` inside the Traefik LXC container.
+This creates `/mnt/monitoring` inside the Traefik LXC container.
 
 ## Deployment
 
@@ -440,7 +440,7 @@ When any configuration file changes, the playbook automatically recreates all af
 
 ```bash
 # All services
-cd /mnt/zfs/docker/monitoring
+cd /mnt/monitoring
 docker compose logs -f
 
 # Specific service
@@ -465,9 +465,9 @@ curl http://localhost:3100/ready
 ### Backup
 
 Important directories to backup:
-- `/mnt/zfs/docker/monitoring/data/grafana` - Dashboards and settings
-- `/mnt/zfs/docker/monitoring/data/prometheus` - Metrics data (optional, 7-day retention)
-- `/mnt/zfs/docker/monitoring/config/` - All configuration files
+- `/mnt/monitoring/data/grafana` - Dashboards and settings
+- `/mnt/monitoring/data/prometheus` - Metrics data (optional, 7-day retention)
+- `/mnt/monitoring/config/` - All configuration files
 
 Since this is on a ZFS dataset, use Sanoid for automated snapshots:
 
@@ -486,7 +486,7 @@ Recovery procedures are documented in `docs/recovery-guide.md`.
 ### Update Services
 
 ```bash
-cd /mnt/zfs/docker/monitoring
+cd /mnt/monitoring
 
 # Pull latest images
 docker compose pull
@@ -539,7 +539,7 @@ docker compose logs alertmanager | grep -i error
 **Verify secrets in .env:**
 ```bash
 # Inside LXC container
-cat /mnt/zfs/docker/monitoring/.env
+cat /mnt/monitoring/.env
 ```
 
 **Test Telegram bot:**

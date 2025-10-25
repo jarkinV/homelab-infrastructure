@@ -140,7 +140,7 @@ The modular playbooks must be run in order:
 ## Directory Structure After Deployment
 
 ```
-/mnt/zfs/docker/monitoring/
+/mnt/monitoring/
 ├── .env                          # Environment variables
 ├── compose.yaml                  # Docker Compose (grows with each phase)
 ├── config/
@@ -272,7 +272,7 @@ ansible-playbook playbooks/apps/monitoring/deploy_monitoring_alerts.yaml
 
 ### Removing Components
 To remove logging or alerting:
-1. Edit `/mnt/zfs/docker/monitoring/compose.yaml`
+1. Edit `/mnt/monitoring/compose.yaml`
 2. Remove the service definitions
 3. Run: `docker compose up -d` (removes deleted services)
 
