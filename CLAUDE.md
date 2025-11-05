@@ -43,6 +43,7 @@ ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
 ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
 ansible-playbook playbooks/apps/immich/deploy_immich.yaml
+ansible-playbook playbooks/apps/n8n/deploy_n8n.yaml
 
 # Monitoring stack - two deployment options:
 # Option 1: Complete deployment (all features at once)
@@ -157,6 +158,9 @@ Required variables in `vars/secrets.yml`:
 - `traefik_dashboard_credentials`: HTTP basic auth for Traefik dashboard
 - `paperless_postgres_password`: PostgreSQL password for Paperless
 - `immich_postgres_password`: PostgreSQL password for Immich
+- `n8n_user`: Username for n8n basic auth
+- `n8n_password`: Password for n8n basic auth
+- `n8n_db_password`: PostgreSQL password for n8n
 - `tailscale_auth_key`: Tailscale authentication key for VPN setup
 - `grafana_admin_password`: Grafana admin password (monitoring stack)
 - `telegram_bot_token`: Telegram bot token for alerts (monitoring stack)
@@ -387,6 +391,24 @@ The repository includes playbooks for deploying the following applications:
   - immich-redis: Redis cache
 - Automatic directory ownership configuration (UIDs: 3001 for app/ML, 999 for database/Redis)
 - Requires `immich_postgres_password` in secrets.yml
+
+**`n8n/deploy_n8n.yaml`**: n8n - workflow automation platform
+- Multi-container stack (app + PostgreSQL)
+- Visual workflow builder with 400+ integrations
+- Automate tasks between apps and services
+- Web interface at n8n.domain.com
+- ZFS dataset: `docker/n8n`
+- Components:
+  - n8n: Main application (workflow engine + web interface)
+  - n8n-db: PostgreSQL database
+- Features:
+  - Basic authentication for security
+  - Webhook support for external triggers
+  - External node modules (axios, qs) enabled
+  - Prometheus metrics enabled
+  - Timezone-aware execution (Europe/Warsaw)
+- No port exposure (Traefik-only access)
+- Requires `n8n_user`, `n8n_password`, `n8n_db_password` in secrets.yml
 
 **`monitoring/deploy_monitoring*.yaml`**: Observability stack with modular deployment
 - Comprehensive monitoring and logging solution for all Docker services
