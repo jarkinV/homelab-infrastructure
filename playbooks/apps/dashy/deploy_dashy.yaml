@@ -1,0 +1,85 @@
+---
+- name: Deploy Dashy Dashboard with Docker Compose
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+
+  vars:
+    dashy_base_dir: /mnt/dashy
+    docker_networks:
+      - proxy
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create Dashy base directory
+      ansible.builtin.file:
+        path: "{{ dashy_base_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create Dashy config directory
+      ansible.builtin.file:
+        path: "{{ dashy_base_dir }}/config"
+        state: directory
+        mode: '0755'
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ dashy_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+
+    - name: Create compose.yaml for Dashy
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ dashy_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Create Dashy configuration file
+      ansible.builtin.template:
+        src: conf.yml.j2
+        dest: "{{ dashy_base_dir }}/config/conf.yml"
+        mode: '0644'
+      register: config_file_result
+
+    - name: Deploy Dashy with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ dashy_base_dir }}"
+        state: present
+        pull: "missing"
+      register: dashy_deploy
+
+    - name: Recreate container if configuration changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ dashy_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed or compose_file_result.changed or config_file_result.changed
+      register: dashy_recreate
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Dashy has been successfully deployed!"
+          - "Base directory: {{ dashy_base_dir }}"
+          - "Config location: {{ dashy_base_dir }}/config/conf.yml"
+          - ""
+          - "Access Dashy at: https://dash.{{ domain }}"
+          - ""
+          - "Container status: {{ 'Running' if dashy_deploy.changed else 'Already running' }}"

@@ -15,6 +15,7 @@
       - immich
       - monitoring
       - n8n
+      - dashy
 
   tasks:
     - name: Check if ZFS pool exists

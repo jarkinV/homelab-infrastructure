@@ -40,6 +40,7 @@ ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snaps
 
 # Application deployments
 ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
+ansible-playbook playbooks/apps/dashy/deploy_dashy.yaml
 ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
 ansible-playbook playbooks/apps/immich/deploy_immich.yaml
@@ -359,6 +360,22 @@ The repository includes playbooks for deploying the following applications:
 - Prometheus metrics enabled (`:8082` endpoint for monitoring)
 - ZFS dataset: `docker/traefik`
 - Docker networks: proxy, tunnel, monitoring
+
+**`dashy/deploy_dashy.yaml`**: Dashy - self-hosted personal dashboard
+- Lightweight, fast dashboard application
+- Customizable homepage with links to all services
+- Single container deployment
+- Web interface at dash.domain.com via Traefik
+- ZFS dataset: `docker/dashy`
+- Configuration: `/mnt/dashy/config/conf.yml` (YAML-based)
+- Features:
+  - Multiple theme options (colorful, darkly, nord, dracula, gruvbox, material)
+  - Customizable layout with grid/list/hex layouts
+  - FontAwesome icon support
+  - Automatic configuration reload (no container restart needed)
+  - Multi-section support with custom ordering
+- No authentication or database required
+- See `playbooks/apps/dashy/README.md` for configuration guide
 
 **`actual/deploy_actual.yaml`**: Actual Budget - personal finance manager
 - Simple budget tracking and finance management

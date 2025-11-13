@@ -1,0 +1,82 @@
+# Dashy Configuration
+# Full documentation: https://dashy.to/docs/configuration
+
+pageTitle: Dashboard
+appConfig:
+  theme: colorful
+  layout: auto
+  iconSize: medium
+  language: en
+  startingView: default
+  showSplashScreen: false
+  auth:
+    enableAuth: false
+  webSearch:
+    disableWebSearch: true
+
+sections:
+  - name: Services
+    displayData:
+      rows: 2
+      cols: 3
+      gap: 1rem
+    items:
+      # Traefik Dashboard
+      - title: Traefik
+        description: Reverse Proxy & Load Balancer
+        icon: fas fa-network-wired
+        url: https://traefik.{{ domain }}
+
+      # Budget App
+      - title: Actual Budget
+        description: Personal Finance Manager
+        icon: fas fa-coins
+        url: https://budget.{{ domain }}
+
+      # Document Management
+      - title: Paperless
+        description: Document Management System
+        icon: fas fa-file-pdf
+        url: https://paperless.{{ domain }}
+
+      # Photo Management
+      - title: Immich
+        description: Photo & Video Management
+        icon: fas fa-images
+        url: https://photos.{{ domain }}
+
+      # Workflow Automation
+      - title: n8n
+        description: Workflow Automation
+        icon: fas fa-project-diagram
+        url: https://n8n.{{ domain }}
+
+      # Monitoring
+      - title: Grafana
+        description: Monitoring & Visualization
+        icon: fas fa-chart-line
+        url: https://grafana.{{ domain }}
+
+  - name: Quick Links
+    displayData:
+      rows: 1
+      cols: 3
+      gap: 1rem
+    items:
+      - title: Proxmox
+        description: Infrastructure Management
+        icon: fas fa-cube
+        url: https://proxmox.local:8006
+
+      - title: Router
+        description: Network Configuration
+        icon: fas fa-wifi
+        url: http://192.168.1.1
+
+# Instructions for customization:
+#
+# 1. To add more services, add new items under the sections
+# 2. To change the layout, adjust 'displayData' settings (rows, cols, gap)
+# 3. Available themes: colorful (default), darkly, nord, dracula, gruvbox, material
+# 4. Find icons at: https://fontawesome.com/search
+# 5. For more advanced configuration, see: https://dashy.to/docs/configuration
