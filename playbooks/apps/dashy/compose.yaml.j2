@@ -7,7 +7,7 @@ services:
     image: docker.io/lissy93/dashy:latest
     container_name: dashy
     volumes:
-      - ${CONFIG_LOCATION}:/app/public
+      - ${CONFIG_LOCATION}:/app/user-data
     environment:
       - NODE_ENV=production
     labels:

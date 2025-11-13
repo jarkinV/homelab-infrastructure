@@ -1,82 +1,69 @@
-# Dashy Configuration
-# Full documentation: https://dashy.to/docs/configuration
-
-pageTitle: Dashboard
+pageInfo:
+  title: Homeserver
+  description: ''
+  navLinks:
+    - title: GitHub
+      path: https://github.com/Lissy93/dashy
+    - title: Documentation
+      path: https://dashy.to/docs
 appConfig:
-  theme: colorful
-  layout: auto
-  iconSize: medium
-  language: en
-  startingView: default
-  showSplashScreen: false
-  auth:
-    enableAuth: false
-  webSearch:
-    disableWebSearch: true
-
+  theme: glass
+  layout: horizontal
+  iconSize: large
 sections:
-  - name: Services
-    displayData:
-      rows: 2
-      cols: 3
-      gap: 1rem
+  - name: Apps
+    icon: fas fa-rocket
     items:
-      # Traefik Dashboard
-      - title: Traefik
-        description: Reverse Proxy & Load Balancer
-        icon: fas fa-network-wired
-        url: https://traefik.{{ domain }}
-
-      # Budget App
-      - title: Actual Budget
-        description: Personal Finance Manager
-        icon: fas fa-coins
-        url: https://budget.{{ domain }}
-
-      # Document Management
-      - title: Paperless
-        description: Document Management System
-        icon: fas fa-file-pdf
-        url: https://paperless.{{ domain }}
-
-      # Photo Management
-      - title: Immich
-        description: Photo & Video Management
-        icon: fas fa-images
-        url: https://photos.{{ domain }}
-
-      # Workflow Automation
-      - title: n8n
-        description: Workflow Automation
-        icon: fas fa-project-diagram
-        url: https://n8n.{{ domain }}
-
-      # Monitoring
-      - title: Grafana
-        description: Monitoring & Visualization
-        icon: fas fa-chart-line
-        url: https://grafana.{{ domain }}
-
-  - name: Quick Links
+      - &ref_0
+        title: Paperless
+        icon: >-
+          https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/paperless.svg
+        url: https://paperless.varshavskyi.com
+        target: newtab
+        id: 0_404_paperless
+      - &ref_1
+        title: Grafana
+        icon: >-
+          https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/grafana.svg
+        url: https://grafana.varshavskyi.com/d/ef1rf5wmbcjcwb/docker-monitoring
+        target: newtab
+        id: 1_404_grafana
+      - &ref_2
+        title: Photos
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/immich.svg
+        url: https://photos.varshavskyi.com/
+        target: newtab
+        id: 2_404_photos
+      - &ref_3
+        title: Traefik
+        icon: >-
+          https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/traefik-proxy.svg
+        url: https://traefik.varshavskyi.com/dashboard/
+        target: newtab
+        id: 3_404_traefik
+      - &ref_4
+        title: Budget
+        icon: >-
+          https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/actual-budget.svg
+        url: https://budget.varshavskyi.com/
+        target: newtab
+        id: 4_404_budget
+      - &ref_5
+        title: N8N
+        icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/n8n.svg
+        url: https://n8n.varshavskyi.com/
+        target: newtab
+        id: 5_404_nn
     displayData:
+      sortBy: default
       rows: 1
-      cols: 3
-      gap: 1rem
-    items:
-      - title: Proxmox
-        description: Infrastructure Management
-        icon: fas fa-cube
-        url: https://proxmox.local:8006
-
-      - title: Router
-        description: Network Configuration
-        icon: fas fa-wifi
-        url: http://192.168.1.1
-
-# Instructions for customization:
-#
-# 1. To add more services, add new items under the sections
-# 2. To change the layout, adjust 'displayData' settings (rows, cols, gap)
-# 3. Available themes: colorful (default), darkly, nord, dracula, gruvbox, material
-# 4. Find icons at: https://fontawesome.com/search
-# 5. For more advanced configuration, see: https://dashy.to/docs/configuration
+      cols: 1
+      collapsed: false
+      hideForGuests: false
+    filteredItems:
+      - *ref_0
+      - *ref_1
+      - *ref_2
+      - *ref_3
+      - *ref_4
+      - *ref_5
