@@ -15,9 +15,9 @@
       - monitoring
       - immich
       - n8n
-      - dashy
       - arr
       - media
+      - homer
 
   tasks:
     - name: Check if container exists

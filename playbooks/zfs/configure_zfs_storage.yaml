@@ -15,9 +15,9 @@
       - immich
       - monitoring
       - n8n
-      - dashy
       - arr
       - media
+      - homer
 
   tasks:
     - name: Check if ZFS pool exists
