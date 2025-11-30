@@ -47,6 +47,7 @@ ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
 ansible-playbook playbooks/apps/immich/deploy_immich.yaml
 ansible-playbook playbooks/apps/n8n/deploy_n8n.yaml
 ansible-playbook playbooks/apps/arr/deploy_arr.yaml
+ansible-playbook playbooks/apps/cloudflared/deploy_cloudflared.yaml
 
 # Monitoring stack - two deployment options:
 # Option 1: Complete deployment (all features at once)
@@ -177,6 +178,7 @@ Required variables in `vars/secrets.yml`:
 - `wifi_password`: WiFi network password
 - `openvpn_user`: NordVPN OpenVPN username (arr stack)
 - `openvpn_password`: NordVPN OpenVPN password (arr stack)
+- `cloudflared_tunnel_token`: Cloudflare Tunnel token for cloudflared
 
 Most playbooks load both files via `vars_files`. Secrets are referenced using `{{ variable_name }}` from secrets.yml.
 
@@ -526,6 +528,29 @@ The repository includes playbooks for deploying the following applications:
 - Full idempotency: all playbooks check existing configuration and only restart when needed
 - See `playbooks/apps/monitoring/README.md` for complete deployment guide
 - See `playbooks/apps/monitoring/README-modular.md` for detailed modular deployment guide
+
+**`cloudflared/deploy_cloudflared.yaml`**: Cloudflare Tunnel - secure tunnel to expose services
+- Single container deployment for secure external access without port forwarding
+- Eliminates need for port forwarding in router (no exposed home IP)
+- All traffic routed through Cloudflare's edge network
+- Automatic DDoS protection and SSL/TLS from Cloudflare
+- Base directory: `/mnt/cloudflared`
+- No ZFS dataset needed (stateless container)
+- Docker network: proxy
+- Features:
+  - Hide home IP address (services accessed via Cloudflare)
+  - No firewall changes required
+  - Free SSL/TLS certificates from Cloudflare
+  - Built-in DDoS protection
+  - Optional access control via Cloudflare Access
+  - Lightweight resource usage (~20-30MB RAM)
+- Integration with Traefik:
+  - Expose Traefik's HTTP port (80) through the tunnel
+  - Point all subdomains to Traefik (10.0.0.10:80)
+  - Traefik handles internal routing to all services
+- Requires `cloudflared_tunnel_token` in secrets.yml
+- Setup: Create tunnel in Cloudflare Zero Trust dashboard, configure public hostnames
+- See `playbooks/apps/cloudflared/README.md` for complete setup guide
 
 All applications use Traefik for SSL termination and routing, with persistent data stored on ZFS datasets.
 

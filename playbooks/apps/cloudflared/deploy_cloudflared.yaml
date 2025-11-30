@@ -1,0 +1,73 @@
+---
+- name: Deploy Cloudflare Tunnel with Docker Compose
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+
+  vars:
+    cloudflared_base_dir: /mnt/cloudflared
+    docker_networks:
+      - proxy
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create Cloudflare Tunnel base directory
+      ansible.builtin.file:
+        path: "{{ cloudflared_base_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ cloudflared_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+      no_log: true
+
+    - name: Create compose.yaml for Cloudflare Tunnel
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ cloudflared_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Deploy Cloudflare Tunnel with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ cloudflared_base_dir }}"
+        state: present
+        pull: "missing"
+      register: cloudflared_deploy
+
+    - name: Recreate container if configuration changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ cloudflared_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed or compose_file_result.changed
+      register: cloudflared_recreate
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Cloudflare Tunnel has been successfully deployed!"
+          - "Base directory: {{ cloudflared_base_dir }}"
+          - ""
+          - "The tunnel will expose your internal services to the internet securely."
+          - "Configure routing in the Cloudflare Zero Trust dashboard."
+          - ""
+          - "Container status: {{ 'Running' if cloudflared_deploy.changed else 'Already running' }}"
