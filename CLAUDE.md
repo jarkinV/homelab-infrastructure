@@ -41,6 +41,7 @@ ansible-playbook playbooks/zfs/install_sanoid.yaml         # Automated ZFS snaps
 # Application deployments
 ansible-playbook playbooks/apps/traefik/deploy_traefik.yaml
 ansible-playbook playbooks/apps/dashy/deploy_dashy.yaml
+ansible-playbook playbooks/apps/homer/deploy_homer.yaml
 ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
 ansible-playbook playbooks/apps/immich/deploy_immich.yaml
@@ -379,6 +380,26 @@ The repository includes playbooks for deploying the following applications:
   - Multi-section support with custom ordering
 - No authentication or database required
 - See `playbooks/apps/dashy/README.md` for configuration guide
+
+**`homer/deploy_homer.yaml`**: Homer - static homepage for services
+- Dead simple static homepage (no backend required)
+- Very lightweight and fast (static HTML/CSS/JS)
+- YAML-based configuration
+- Single container deployment
+- Web interface at homer.domain.com via Traefik
+- ZFS dataset: `docker/homer`
+- Configuration: `/mnt/homer/assets/config.yml` (YAML-based)
+- Features:
+  - Built-in dark/light theme support
+  - Responsive design (mobile-friendly)
+  - FontAwesome & custom logo support
+  - Quick search functionality
+  - Service grouping and categorization
+  - No authentication or database required
+  - Instant configuration reload (no restart needed)
+- Based on Bulma CSS framework
+- Resource usage: ~10MB RAM (vs ~50MB for Dashy)
+- See `playbooks/apps/homer/README.md` for configuration guide
 
 **`actual/deploy_actual.yaml`**: Actual Budget - personal finance manager
 - Simple budget tracking and finance management

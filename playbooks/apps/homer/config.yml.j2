@@ -1,0 +1,152 @@
+---
+title: "Homer Dashboard"
+subtitle: "Services"
+logo: "https://raw.githubusercontent.com/lllllllillllllillll/Dashboard-Icons/main/png/homer.png"
+
+header: true
+footer: ""
+
+theme: default
+colors:
+  light:
+    highlight-primary: "#3367d6"
+    highlight-secondary: "#4285f4"
+    highlight-hover: "#5a95f5"
+    background: "#f5f5f5"
+    card-background: "#ffffff"
+    text: "#363636"
+    text-header: "#ffffff"
+    text-title: "#303030"
+    text-subtitle: "#424242"
+    card-shadow: rgba(0, 0, 0, 0.1)
+    link: "#3273dc"
+    link-hover: "#363636"
+  dark:
+    highlight-primary: "#3367d6"
+    highlight-secondary: "#4285f4"
+    highlight-hover: "#5a95f5"
+    background: "#131313"
+    card-background: "#2b2b2b"
+    text: "#eaeaea"
+    text-header: "#ffffff"
+    text-title: "#fafafa"
+    text-subtitle: "#f5f5f5"
+    card-shadow: rgba(0, 0, 0, 0.4)
+    link: "#3273dc"
+    link-hover: "#ffdd57"
+
+# Optional navbar
+# links: [] # Allows for navbar (dark mode, layout, and search) without any links
+links:
+  - name: "Documentation"
+    icon: "fab fa-github"
+    url: "https://github.com/bastienwirtz/homer"
+    target: "_blank" # optional html a tag target attribute
+  - name: "Google"
+    icon: "fab fa-google"
+    url: "https://www.google.com/"
+    target: "_blank" # optional html a tag target attribute
+
+# Services
+# First level array represents a group.
+# Leave only a "items" key if not using group (group name, icon & tagstyle are optional, section separation will not be displayed).
+services:
+  - name: "Infrastructure"
+    icon: "fas fa-cloud"
+    items:
+      - name: "Traefik"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/traefik.png"
+        subtitle: "Reverse Proxy"
+        tag: "proxy"
+        url: "https://traefik.{{ domain }}"
+        target: "_blank"
+
+      - name: "Grafana"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/grafana.png"
+        subtitle: "Monitoring"
+        tag: "monitoring"
+        url: "https://grafana.{{ domain }}"
+        target: "_blank"
+
+      - name: "Prometheus"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/prometheus.png"
+        subtitle: "Metrics"
+        tag: "monitoring"
+        url: "https://prometheus.{{ domain }}"
+        target: "_blank"
+
+  - name: "Applications"
+    icon: "fas fa-server"
+    items:
+      - name: "Actual Budget"
+        logo: "https://raw.githubusercontent.com/lllllllillllllillll/Dashboard-Icons/main/png/actual.png"
+        subtitle: "Finance Management"
+        tag: "finance"
+        url: "https://budget.{{ domain }}"
+        target: "_blank"
+
+      - name: "Paperless-ngx"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/paperless-ng.png"
+        subtitle: "Document Management"
+        tag: "documents"
+        url: "https://paperless.{{ domain }}"
+        target: "_blank"
+
+      - name: "Immich"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/immich.png"
+        subtitle: "Photo & Video Management"
+        tag: "media"
+        url: "https://photos.{{ domain }}"
+        target: "_blank"
+
+      - name: "n8n"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/n8n.png"
+        subtitle: "Workflow Automation"
+        tag: "automation"
+        url: "https://n8n.{{ domain }}"
+        target: "_blank"
+
+  - name: "Media"
+    icon: "fas fa-film"
+    items:
+      - name: "Jellyfin"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/jellyfin.png"
+        subtitle: "Media Server"
+        tag: "media"
+        url: "https://jellyfin.{{ domain }}"
+        target: "_blank"
+
+      - name: "Jellyseerr"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/jellyseerr.png"
+        subtitle: "Media Requests"
+        tag: "media"
+        url: "https://jellyseerr.{{ domain }}"
+        target: "_blank"
+
+      - name: "Radarr"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/radarr.png"
+        subtitle: "Movie Management"
+        tag: "arr"
+        url: "https://radarr.{{ domain }}"
+        target: "_blank"
+
+      - name: "Sonarr"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/sonarr.png"
+        subtitle: "TV Management"
+        tag: "arr"
+        url: "https://sonarr.{{ domain }}"
+        target: "_blank"
+
+      - name: "Prowlarr"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/prowlarr.png"
+        subtitle: "Indexer Manager"
+        tag: "arr"
+        url: "https://prowlarr.{{ domain }}"
+        target: "_blank"
+
+      - name: "qBittorrent"
+        logo: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/qbittorrent.png"
+        subtitle: "Torrent Client"
+        tag: "arr"
+        url: "https://qbittorrent.{{ domain }}"
+        target: "_blank"
