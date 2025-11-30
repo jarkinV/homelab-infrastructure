@@ -45,6 +45,7 @@ ansible-playbook playbooks/apps/actual/deploy_actual.yaml
 ansible-playbook playbooks/apps/paperless/deploy_paperless.yaml
 ansible-playbook playbooks/apps/immich/deploy_immich.yaml
 ansible-playbook playbooks/apps/n8n/deploy_n8n.yaml
+ansible-playbook playbooks/apps/arr/deploy_arr.yaml
 
 # Monitoring stack - two deployment options:
 # Option 1: Complete deployment (all features at once)
@@ -173,6 +174,8 @@ Required variables in `vars/secrets.yml`:
 - `smtp_to`: Email recipient for alerts (monitoring stack)
 - `wifi_ssid`: WiFi network SSID
 - `wifi_password`: WiFi network password
+- `openvpn_user`: NordVPN OpenVPN username (arr stack)
+- `openvpn_password`: NordVPN OpenVPN password (arr stack)
 
 Most playbooks load both files via `vars_files`. Secrets are referenced using `{{ variable_name }}` from secrets.yml.
 
@@ -426,6 +429,57 @@ The repository includes playbooks for deploying the following applications:
   - Timezone-aware execution (Europe/Warsaw)
 - No port exposure (Traefik-only access)
 - Requires `n8n_user`, `n8n_password`, `n8n_db_password` in secrets.yml
+
+**`arr/deploy_arr.yaml`**: Arr Stack - complete media automation solution
+- Multi-container stack (7 services) for automated media management
+- Base directory: `/mnt/arr`
+- Media directory: `/mnt/media`
+- ZFS dataset: `docker/arr` (recommended)
+- Docker networks: proxy, arr-network
+- Components:
+  - **gluetun**: VPN container with NordVPN for secure torrenting
+    - VPN provider: NordVPN (OpenVPN)
+    - Kill switch enabled (all traffic through VPN)
+    - Healthcheck for VPN connectivity
+    - qBittorrent routes through gluetun's network
+  - **qbittorrent**: BitTorrent client at qbittorrent.domain.com
+    - Routes through gluetun VPN (network_mode: service:gluetun)
+    - Web UI port: 8080
+    - Torrent ports: 6881 (TCP/UDP)
+  - **prowlarr**: Indexer manager at prowlarr.domain.com
+    - Centralized indexer management for Radarr and Sonarr
+    - Port: 9696
+  - **radarr**: Movie collection manager at radarr.domain.com
+    - Automated movie downloading and organization
+    - Port: 7878
+  - **sonarr**: TV show collection manager at sonarr.domain.com
+    - Automated TV series downloading and organization
+    - Port: 8989
+  - **jellyseerr**: Request management at jellyseerr.domain.com
+    - User-friendly request interface for movies and TV shows
+    - Integrates with Radarr and Sonarr
+    - Port: 5055
+  - **jellyfin**: Media server at jellyfin.domain.com
+    - Hardware-accelerated transcoding (/dev/dri/renderD128)
+    - VAAPI support for Intel Quick Sync
+    - Port: 8096
+- Media directory structure:
+  - `/mnt/media/torrents/` - Download location
+    - `torrents/movies/` - Movie downloads
+    - `torrents/tv/` - TV show downloads
+  - `/mnt/media/media/` - Final media library
+    - `media/movies/` - Movie library for Jellyfin
+    - `media/tv/` - TV show library for Jellyfin
+- Configuration:
+  - All services use PUID/PGID for consistent file permissions
+  - Timezone-aware (TZ environment variable)
+  - qBittorrent traffic routed through VPN (depends on gluetun health)
+- Requires `openvpn_user`, `openvpn_password` in secrets.yml
+- Optional variables (set in vars/secrets.yml or playbook vars):
+  - `arr_puid`: User ID for file ownership (default: 1000)
+  - `arr_pgid`: Group ID for file ownership (default: 1000)
+  - `openvpn_server_countries`: VPN server location (default: Ukraine)
+  - `jellyfin_render_gid`: Group ID for /dev/dri access (default: 107)
 
 **`monitoring/deploy_monitoring*.yaml`**: Observability stack with modular deployment
 - Comprehensive monitoring and logging solution for all Docker services

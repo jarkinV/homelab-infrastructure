@@ -16,6 +16,8 @@
       - immich
       - n8n
       - dashy
+      - arr
+      - media
 
   tasks:
     - name: Check if container exists

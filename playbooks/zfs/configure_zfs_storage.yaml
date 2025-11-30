@@ -16,6 +16,8 @@
       - monitoring
       - n8n
       - dashy
+      - arr
+      - media
 
   tasks:
     - name: Check if ZFS pool exists

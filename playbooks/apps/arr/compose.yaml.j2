@@ -1,0 +1,161 @@
+networks:
+  proxy:
+    external: true
+  arr-network:
+
+x-networks-proxy: &networks-proxy
+  networks:
+    - proxy
+    - arr-network
+
+x-environment: &environment
+  environment:
+    - PUID=${PUID}
+    - PGID=${PGID}
+    - TZ=${TZ}
+
+x-default: &default
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    <<: [ *networks-proxy, *default ]
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - VPN_SERVICE_PROVIDER=nordvpn
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER={{ openvpn_user }}
+      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+      - SERVER_COUNTRIES={{ openvpn_server_countries | default('Ukraine') }}
+    volumes:
+      - ${CONFIG_DIR}/gluetun:/gluetun
+    ports:
+      - "6881:6881"
+      - "6881:6881/udp"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.qbittorrent.entrypoints=https"
+      - "traefik.http.routers.qbittorrent.rule=Host(`qbittorrent.${DOMAIN}`)"
+      - "traefik.http.routers.qbittorrent.tls=true"
+      - "traefik.http.routers.qbittorrent.tls.certresolver=cloudflare"
+      - "traefik.http.routers.qbittorrent.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.qbittorrent.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.qbittorrent.loadbalancer.server.port=8080"
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: service:gluetun
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+    volumes:
+      - ${CONFIG_DIR}/qbittorrent/config:/config
+      - ${MEDIA_DIR}/torrents:/data/torrents
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    <<: *default
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    <<: [ *environment, *networks-proxy, *default ]
+    volumes:
+      - ${CONFIG_DIR}/prowlarr:/config
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.prowlarr.entrypoints=https"
+      - "traefik.http.routers.prowlarr.rule=Host(`prowlarr.${DOMAIN}`)"
+      - "traefik.http.routers.prowlarr.tls=true"
+      - "traefik.http.routers.prowlarr.tls.certresolver=cloudflare"
+      - "traefik.http.routers.prowlarr.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.prowlarr.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.prowlarr.loadbalancer.server.port=9696"
+
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    <<: [ *environment, *networks-proxy, *default ]
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${CONFIG_DIR}/radarr:/config
+      - ${MEDIA_DIR}:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.radarr.entrypoints=https"
+      - "traefik.http.routers.radarr.rule=Host(`radarr.${DOMAIN}`)"
+      - "traefik.http.routers.radarr.tls=true"
+      - "traefik.http.routers.radarr.tls.certresolver=cloudflare"
+      - "traefik.http.routers.radarr.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.radarr.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.radarr.loadbalancer.server.port=7878"
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    <<: [ *environment, *networks-proxy, *default ]
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${CONFIG_DIR}/sonarr:/config
+      - ${MEDIA_DIR}:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.sonarr.entrypoints=https"
+      - "traefik.http.routers.sonarr.rule=Host(`sonarr.${DOMAIN}`)"
+      - "traefik.http.routers.sonarr.tls=true"
+      - "traefik.http.routers.sonarr.tls.certresolver=cloudflare"
+      - "traefik.http.routers.sonarr.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.sonarr.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.sonarr.loadbalancer.server.port=8989"
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    <<: [ *environment, *networks-proxy, *default ]
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${CONFIG_DIR}/jellyseerr:/app/config
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.jellyseerr.entrypoints=https"
+      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr.${DOMAIN}`)"
+      - "traefik.http.routers.jellyseerr.tls=true"
+      - "traefik.http.routers.jellyseerr.tls.certresolver=cloudflare"
+      - "traefik.http.routers.jellyseerr.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.jellyseerr.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.jellyseerr.loadbalancer.server.port=5055"
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    <<: [ *environment, *networks-proxy, *default ]
+    group_add:
+      - '{{ jellyfin_render_gid | default("107") }}'
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    volumes:
+      - ${CONFIG_DIR}/jellyfin/config:/config
+      - ${MEDIA_DIR}/media:/media
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.jellyfin.entrypoints=https"
+      - "traefik.http.routers.jellyfin.rule=Host(`jellyfin.${DOMAIN}`)"
+      - "traefik.http.routers.jellyfin.tls=true"
+      - "traefik.http.routers.jellyfin.tls.certresolver=cloudflare"
+      - "traefik.http.routers.jellyfin.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.jellyfin.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.services.jellyfin.loadbalancer.server.port=8096"

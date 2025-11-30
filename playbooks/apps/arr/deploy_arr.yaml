@@ -1,0 +1,126 @@
+---
+- name: Deploy Arr Stack (Media Automation) with Docker Compose
+  hosts: lxc_internal_containers
+  become: true
+
+  vars_files:
+    - ../../../vars/global.yml
+    - ../../../vars/secrets.yml
+
+  vars:
+    arr_base_dir: /mnt/arr
+    arr_media_dir: /mnt/media
+    docker_networks:
+      - proxy
+
+  tasks:
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Docker networks if they don't exist
+      community.docker.docker_network:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ docker_networks }}"
+
+    - name: Create arr base directory
+      ansible.builtin.file:
+        path: "{{ arr_base_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create arr config subdirectories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ arr_base_dir }}/config"
+        - "{{ arr_base_dir }}/config/gluetun"
+        - "{{ arr_base_dir }}/config/qbittorrent"
+        - "{{ arr_base_dir }}/config/prowlarr"
+        - "{{ arr_base_dir }}/config/radarr"
+        - "{{ arr_base_dir }}/config/sonarr"
+        - "{{ arr_base_dir }}/config/jellyseerr"
+        - "{{ arr_base_dir }}/config/jellyfin"
+
+    - name: Create media directory structure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ arr_media_dir }}"
+        - "{{ arr_media_dir }}/torrents"
+        - "{{ arr_media_dir }}/torrents/movies"
+        - "{{ arr_media_dir }}/torrents/tv"
+        - "{{ arr_media_dir }}/media"
+        - "{{ arr_media_dir }}/media/movies"
+        - "{{ arr_media_dir }}/media/tv"
+
+    - name: Set ownership for arr config directories (PUID/PGID)
+      ansible.builtin.file:
+        path: "{{ arr_base_dir }}/config"
+        owner: "{{ arr_puid | default('1000') }}"
+        group: "{{ arr_pgid | default('1000') }}"
+        recurse: true
+        state: directory
+
+    - name: Set ownership for media directories (PUID/PGID)
+      ansible.builtin.file:
+        path: "{{ arr_media_dir }}"
+        owner: "{{ arr_puid | default('1000') }}"
+        group: "{{ arr_pgid | default('1000') }}"
+        recurse: true
+        state: directory
+
+    - name: Create .env file for Docker Compose
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ arr_base_dir }}/.env"
+        mode: '0600'
+      register: env_file_result
+      no_log: true
+
+    - name: Create compose.yaml for arr stack
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ arr_base_dir }}/compose.yaml"
+        mode: '0644'
+      register: compose_file_result
+
+    - name: Deploy arr stack with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ arr_base_dir }}"
+        state: present
+        pull: "missing"
+      register: arr_deploy
+
+    - name: Recreate containers if configuration changed
+      community.docker.docker_compose_v2:
+        project_src: "{{ arr_base_dir }}"
+        state: present
+        recreate: always
+      when: env_file_result.changed or compose_file_result.changed
+      register: arr_recreate
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg:
+          - "Arr stack has been successfully deployed!"
+          - "Base directory: {{ arr_base_dir }}"
+          - "Config location: {{ arr_base_dir }}/config"
+          - "Media location: {{ arr_media_dir }}"
+          - ""
+          - "Services available at:"
+          - "  - qBittorrent: https://qbittorrent.{{ domain }}"
+          - "  - Prowlarr: https://prowlarr.{{ domain }}"
+          - "  - Radarr: https://radarr.{{ domain }}"
+          - "  - Sonarr: https://sonarr.{{ domain }}"
+          - "  - Jellyseerr: https://jellyseerr.{{ domain }}"
+          - "  - Jellyfin: https://jellyfin.{{ domain }}"
+          - ""
+          - "Container status: {{ 'Running' if arr_deploy.changed else 'Already running' }}"
